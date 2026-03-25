@@ -1,26 +1,13 @@
 ---
 import BaseLayout from '@layouts/BaseLayout.astro';
+import ConversationInbox from '@components/ConversationInbox.vue';
 ---
 
 <BaseLayout title="Conversations">
-  <div class="page-header">
-    <h1>Conversations</h1>
-    <p>View and manage SMS conversations with leads</p>
+  <div class="mb-6">
+    <h1 class="text-2xl font-semibold">Conversations</h1>
+    <p class="text-sm text-slate-400 mt-1">View and manage SMS conversations with leads</p>
   </div>
 
-  <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
-    <button class="btn btn-primary" data-filter="all">All</button>
-    <button class="btn" style="background: var(--color-surface-hover);" data-filter="active">Active</button>
-    <button class="btn" style="background: var(--color-surface-hover);" data-filter="needs_human">Needs Human</button>
-    <button class="btn" style="background: var(--color-surface-hover);" data-filter="human_controlled">Human Controlled</button>
-    <button class="btn" style="background: var(--color-surface-hover);" data-filter="completed">Completed</button>
-  </div>
-
-  <div id="conversations-list">
-    <div class="card">
-      <p style="color: var(--color-text-muted); font-size: 0.875rem;">
-        No conversations yet. Conversations appear when leads are posted via webhook.
-      </p>
-    </div>
-  </div>
+  <ConversationInbox client:load />
 </BaseLayout>

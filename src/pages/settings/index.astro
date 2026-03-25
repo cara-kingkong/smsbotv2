@@ -1,56 +1,34 @@
 ---
 import BaseLayout from '@layouts/BaseLayout.astro';
+
+const integrations = [
+  { name: 'Twilio (SMS)', desc: 'Send and receive SMS messages' },
+  { name: 'OpenAI', desc: 'AI-powered conversation replies' },
+  { name: 'Anthropic', desc: 'Alternative AI provider' },
+  { name: 'Calendly', desc: 'Calendar booking for qualified leads' },
+  { name: 'Keap / Infusionsoft', desc: 'CRM outcome sync (tags, notes)' },
+];
 ---
 
 <BaseLayout title="Settings">
-  <div class="page-header">
-    <h1>Settings</h1>
-    <p>Workspace configuration and integrations</p>
+  <div class="mb-6">
+    <h1 class="text-2xl font-semibold">Settings</h1>
+    <p class="text-sm text-slate-400 mt-1">Workspace configuration and integrations</p>
   </div>
 
-  <div class="card">
-    <h2 style="font-size: 1.125rem; margin-bottom: 1rem;">Integrations</h2>
+  <div class="bg-surface border border-slate-700 rounded-lg p-6">
+    <h2 class="text-lg font-semibold mb-4">Integrations</h2>
 
-    <div style="display: grid; gap: 1rem;">
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: var(--color-bg); border-radius: var(--radius);">
-        <div>
-          <strong>Twilio (SMS)</strong>
-          <p style="color: var(--color-text-muted); font-size: 0.75rem;">Send and receive SMS messages</p>
+    <div class="flex flex-col gap-3">
+      {integrations.map(int => (
+        <div class="flex justify-between items-center p-4 bg-slate-900 rounded-lg">
+          <div>
+            <div class="font-semibold text-sm">{int.name}</div>
+            <div class="text-xs text-slate-400">{int.desc}</div>
+          </div>
+          <span class="text-xs text-slate-400">Not configured</span>
         </div>
-        <span style="color: var(--color-text-muted); font-size: 0.75rem;">Not configured</span>
-      </div>
-
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: var(--color-bg); border-radius: var(--radius);">
-        <div>
-          <strong>OpenAI</strong>
-          <p style="color: var(--color-text-muted); font-size: 0.75rem;">AI-powered conversation replies</p>
-        </div>
-        <span style="color: var(--color-text-muted); font-size: 0.75rem;">Not configured</span>
-      </div>
-
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: var(--color-bg); border-radius: var(--radius);">
-        <div>
-          <strong>Anthropic</strong>
-          <p style="color: var(--color-text-muted); font-size: 0.75rem;">Alternative AI provider</p>
-        </div>
-        <span style="color: var(--color-text-muted); font-size: 0.75rem;">Not configured</span>
-      </div>
-
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: var(--color-bg); border-radius: var(--radius);">
-        <div>
-          <strong>Calendly</strong>
-          <p style="color: var(--color-text-muted); font-size: 0.75rem;">Calendar booking for qualified leads</p>
-        </div>
-        <span style="color: var(--color-text-muted); font-size: 0.75rem;">Not configured</span>
-      </div>
-
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: var(--color-bg); border-radius: var(--radius);">
-        <div>
-          <strong>Keap / Infusionsoft</strong>
-          <p style="color: var(--color-text-muted); font-size: 0.75rem;">CRM outcome sync (tags, notes)</p>
-        </div>
-        <span style="color: var(--color-text-muted); font-size: 0.75rem;">Not configured</span>
-      </div>
+      ))}
     </div>
   </div>
 </BaseLayout>

@@ -5,17 +5,20 @@ import { MessagingService } from '../../src/lib/messaging/service';
 import { AIService } from '../../src/lib/ai/service';
 import { AgentService } from '../../src/lib/agents/service';
 import { LeadService } from '../../src/lib/leads/service';
+import { CampaignService } from '../../src/lib/campaigns/service';
 import { BookingService } from '../../src/lib/calendar/service';
 import { QueueService } from '../../src/lib/queues/service';
 import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
 import { OpenAIAdapter } from '../../src/lib/ai/adapters/openai';
 import { AnthropicAdapter } from '../../src/lib/ai/adapters/anthropic';
-import { ConversationStatus, SenderType } from '../../src/lib/types';
+import { ConversationStatus, ConversationOutcome, SenderType } from '../../src/lib/types';
 import type { AIProviderAdapter } from '../../src/lib/types';
+import { isWithinBusinessHours, getNextBusinessHoursStart } from '../../src/lib/utils/business-hours';
+import { evaluateStopConditions } from '../../src/lib/utils/stop-conditions';
 
 /**
  * Background function: Generate AI reply and send SMS.
- * Netlify auto-detects *-background naming convention.
+ * Enforces business hours, stop conditions, and persists AI decisions.
  */
 export default async (req: Request, _context: Context) => {
   const db = getServiceClient();
@@ -32,13 +35,19 @@ export default async (req: Request, _context: Context) => {
     }
 
     // Skip if human-controlled or terminal
-    if (conversation.human_controlled || conversation.status === ConversationStatus.Completed || conversation.status === ConversationStatus.OptedOut) {
+    if (
+      conversation.human_controlled ||
+      conversation.status === ConversationStatus.Completed ||
+      conversation.status === ConversationStatus.OptedOut ||
+      conversation.status === ConversationStatus.Failed
+    ) {
       return new Response('Skipped', { status: 200 });
     }
 
     // Load dependencies
     const agentService = new AgentService(db);
     const leadService = new LeadService(db);
+    const campaignService = new CampaignService(db);
     const twilioAdapter = new TwilioAdapter(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
     const messagingService = new MessagingService(db, twilioAdapter);
 
@@ -47,6 +56,42 @@ export default async (req: Request, _context: Context) => {
 
     const lead = await leadService.getById(conversation.lead_id);
     if (!lead) throw new Error(`Lead not found: ${conversation.lead_id}`);
+
+    const campaign = await campaignService.getById(conversation.campaign_id);
+    if (!campaign) throw new Error(`Campaign not found: ${conversation.campaign_id}`);
+
+    // ── Stop conditions check ──────────────────────────────────
+    const stopResult = await evaluateStopConditions(db, conversation, campaign.stop_conditions_json);
+    if (stopResult.should_stop) {
+      console.log(`Conversation ${conversation_id} stopped: ${stopResult.reason}`);
+      await conversationService.setOutcome(conversation_id, ConversationOutcome.NoResponse);
+      await conversationService.updateStatus(conversation_id, ConversationStatus.Completed);
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: 'stop_condition_reached',
+        event_payload_json: { reason: stopResult.reason },
+      });
+      return new Response('Stopped', { status: 200 });
+    }
+
+    // ── Business hours check ───────────────────────────────────
+    const hasBusinessHours = campaign.business_hours_json?.schedule?.length > 0;
+    if (hasBusinessHours && !isWithinBusinessHours(campaign.business_hours_json, lead.timezone)) {
+      const nextOpen = getNextBusinessHoursStart(campaign.business_hours_json, lead.timezone);
+      if (nextOpen) {
+        // Re-queue for next business hours window
+        const queueService = new QueueService(db);
+        await queueService.enqueue({
+          job_type: 'generate_ai_reply',
+          queue_name: 'ai',
+          payload: { conversation_id, trigger: 'business_hours_deferred' },
+          run_at: nextOpen,
+        });
+        await conversationService.updateStatus(conversation_id, ConversationStatus.PausedBusinessHours);
+        console.log(`Conversation ${conversation_id} deferred to business hours: ${nextOpen.toISOString()}`);
+        return new Response('Deferred', { status: 200 });
+      }
+    }
 
     // Get message history
     const history = await messagingService.getHistory(conversation_id);
@@ -59,8 +104,17 @@ export default async (req: Request, _context: Context) => {
     const aiService = new AIService(db, aiAdapters);
 
     // Get calendars for agent
-    const bookingService = new BookingService(db, null as never); // Calendar adapter not needed for ID list
+    const bookingService = new BookingService(db, null as never);
     const calendars = await bookingService.getCalendarsForAgent(conversation.agent_id);
+
+    // Resolve AI provider from integration, fallback to default
+    let providerKey = 'openai';
+    if (version.config_json && typeof version.config_json === 'object' && 'provider' in version.config_json) {
+      providerKey = version.config_json.provider as string;
+    }
+    if (!aiAdapters.has(providerKey)) {
+      providerKey = aiAdapters.keys().next().value ?? 'openai';
+    }
 
     // Generate AI decision
     const decision = await aiService.generateReply({
@@ -68,14 +122,34 @@ export default async (req: Request, _context: Context) => {
       conversation_history: history,
       lead,
       available_calendar_ids: calendars.map((c) => c.id),
-      provider_key: 'openai', // Default; resolve from integration later
+      provider_key: providerKey,
+    });
+
+    // ── Persist AI decision to ai_decisions table ──────────────
+    await db.from('ai_decisions').insert({
+      workspace_id: conversation.workspace_id,
+      conversation_id,
+      agent_version_id: version.id,
+      model_name: providerKey === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o',
+      input_json: {
+        history_length: history.length,
+        lead_timezone: lead.timezone,
+        available_calendars: calendars.length,
+      },
+      decision_json: decision,
+      raw_response_json: decision,
     });
 
     // Log AI decision event
     await db.from('conversation_events').insert({
       conversation_id,
       event_type: 'ai_reply_generated',
-      event_payload_json: decision,
+      event_payload_json: {
+        should_reply: decision.should_reply,
+        qualification_state: decision.qualification_state,
+        escalate_to_human: decision.escalate_to_human,
+        should_book: decision.should_book,
+      },
     });
 
     // Handle escalation
@@ -86,13 +160,21 @@ export default async (req: Request, _context: Context) => {
 
     // Send reply if AI says to
     if (decision.should_reply && decision.reply_text) {
-      await messagingService.sendOutbound({
+      const message = await messagingService.sendOutbound({
         conversation_id,
         to: lead.phone_e164,
         from: process.env.TWILIO_PHONE_NUMBER!,
         body_text: decision.reply_text,
         sender_type: SenderType.AI,
       });
+
+      // Link message to AI decision
+      await db.from('ai_decisions')
+        .update({ message_id: message.id })
+        .eq('conversation_id', conversation_id)
+        .is('message_id', null)
+        .order('created_at', { ascending: false })
+        .limit(1);
 
       await conversationService.updateStatus(conversation_id, ConversationStatus.WaitingForLead);
     }

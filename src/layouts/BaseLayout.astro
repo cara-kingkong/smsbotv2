@@ -5,171 +5,50 @@ interface Props {
 }
 
 const { title, requireAuth = false } = Astro.props;
+const currentPath = Astro.url.pathname;
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{title} | RuFlo SMS</title>
     <style>
-      :root {
-        --color-bg: #0f172a;
-        --color-surface: #1e293b;
-        --color-surface-hover: #334155;
-        --color-border: #334155;
-        --color-text: #f1f5f9;
-        --color-text-muted: #94a3b8;
-        --color-primary: #3b82f6;
-        --color-primary-hover: #2563eb;
-        --color-success: #22c55e;
-        --color-warning: #f59e0b;
-        --color-error: #ef4444;
-        --radius: 8px;
-      }
-
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background: var(--color-bg);
-        color: var(--color-text);
-        min-height: 100vh;
-      }
-
-      .app-shell {
-        display: flex;
-        min-height: 100vh;
-      }
-
-      .sidebar {
-        width: 240px;
-        background: var(--color-surface);
-        border-right: 1px solid var(--color-border);
-        padding: 1.5rem 0;
-        display: flex;
-        flex-direction: column;
-      }
-
-      .sidebar-brand {
-        padding: 0 1.5rem 1.5rem;
-        border-bottom: 1px solid var(--color-border);
-        font-size: 1.25rem;
-        font-weight: 700;
-        color: var(--color-primary);
-      }
-
-      .sidebar-nav {
-        flex: 1;
-        padding: 1rem 0;
-      }
-
-      .sidebar-nav a {
-        display: block;
-        padding: 0.625rem 1.5rem;
-        color: var(--color-text-muted);
-        text-decoration: none;
-        font-size: 0.875rem;
-        transition: all 0.15s;
-      }
-
-      .sidebar-nav a:hover,
-      .sidebar-nav a.active {
-        color: var(--color-text);
-        background: var(--color-surface-hover);
-      }
-
-      .main-content {
-        flex: 1;
-        padding: 2rem;
-        overflow-y: auto;
-      }
-
-      .page-header {
-        margin-bottom: 2rem;
-      }
-
-      .page-header h1 {
-        font-size: 1.5rem;
-        font-weight: 600;
-      }
-
-      .page-header p {
-        color: var(--color-text-muted);
-        margin-top: 0.25rem;
-        font-size: 0.875rem;
-      }
-
-      .card {
-        background: var(--color-surface);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius);
-        padding: 1.5rem;
-        margin-bottom: 1rem;
-      }
-
-      .btn {
-        display: inline-flex;
-        align-items: center;
-        padding: 0.5rem 1rem;
-        border-radius: var(--radius);
-        font-size: 0.875rem;
-        font-weight: 500;
-        border: none;
-        cursor: pointer;
-        transition: all 0.15s;
-        text-decoration: none;
-      }
-
-      .btn-primary {
-        background: var(--color-primary);
-        color: white;
-      }
-
-      .btn-primary:hover {
-        background: var(--color-primary-hover);
-      }
-
-      .stat-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-        gap: 1rem;
-      }
-
-      .stat-card {
-        background: var(--color-surface);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius);
-        padding: 1.25rem;
-      }
-
-      .stat-card .label {
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--color-text-muted);
-      }
-
-      .stat-card .value {
-        font-size: 1.75rem;
-        font-weight: 700;
-        margin-top: 0.25rem;
-      }
+      @import "../styles/global.css";
     </style>
   </head>
-  <body>
-    <div class="app-shell">
-      <aside class="sidebar">
-        <div class="sidebar-brand">RuFlo SMS</div>
-        <nav class="sidebar-nav">
-          <a href="/dashboard">Dashboard</a>
-          <a href="/campaigns">Campaigns</a>
-          <a href="/conversations">Conversations</a>
-          <a href="/settings">Settings</a>
+  <body class="bg-slate-900 text-slate-100 font-sans min-h-screen">
+    <div class="flex min-h-screen">
+      <!-- Sidebar -->
+      <aside class="w-60 bg-surface border-r border-slate-700 flex flex-col shrink-0">
+        <div class="px-6 py-5 border-b border-slate-700 text-xl font-bold text-blue-500">
+          RuFlo SMS
+        </div>
+        <nav class="flex-1 py-4">
+          {[
+            { href: '/dashboard', label: 'Dashboard' },
+            { href: '/campaigns', label: 'Campaigns' },
+            { href: '/conversations', label: 'Conversations' },
+            { href: '/settings', label: 'Settings' },
+          ].map(link => (
+            <a
+              href={link.href}
+              class:list={[
+                'block px-6 py-2.5 text-sm transition-colors',
+                currentPath.startsWith(link.href)
+                  ? 'text-slate-100 bg-surface-hover font-medium'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-surface-hover',
+              ]}
+            >
+              {link.label}
+            </a>
+          ))}
         </nav>
       </aside>
-      <main class="main-content">
+
+      <!-- Main content -->
+      <main class="flex-1 p-8 overflow-y-auto">
         <slot />
       </main>
     </div>

@@ -1,46 +1,13 @@
 ---
 import BaseLayout from '@layouts/BaseLayout.astro';
+import DashboardView from '@components/DashboardView.vue';
 ---
 
 <BaseLayout title="Dashboard">
-  <div class="page-header">
-    <h1>Dashboard</h1>
-    <p>Overview of your workspace activity</p>
+  <div class="mb-6">
+    <h1 class="text-2xl font-semibold">Dashboard</h1>
+    <p class="text-sm text-slate-400 mt-1">Overview of your workspace activity</p>
   </div>
 
-  <div class="stat-grid" id="metrics">
-    <div class="stat-card">
-      <div class="label">Total Conversations</div>
-      <div class="value" id="total-conversations">--</div>
-    </div>
-    <div class="stat-card">
-      <div class="label">Active</div>
-      <div class="value" id="active-conversations">--</div>
-    </div>
-    <div class="stat-card">
-      <div class="label">Booked</div>
-      <div class="value" id="booked">--</div>
-    </div>
-    <div class="stat-card">
-      <div class="label">Qualified</div>
-      <div class="value" id="qualified">--</div>
-    </div>
-    <div class="stat-card">
-      <div class="label">Opt-Outs</div>
-      <div class="value" id="opted-out">--</div>
-    </div>
-    <div class="stat-card">
-      <div class="label">Needs Human</div>
-      <div class="value" id="needs-human">--</div>
-    </div>
-  </div>
-
-  <div class="card" style="margin-top: 2rem;">
-    <h2 style="font-size: 1.125rem; margin-bottom: 1rem;">Recent Conversations</h2>
-    <div id="recent-conversations">
-      <p style="color: var(--color-text-muted); font-size: 0.875rem;">
-        Connect your environment variables and Supabase to see live data here.
-      </p>
-    </div>
-  </div>
+  <DashboardView client:load />
 </BaseLayout>
