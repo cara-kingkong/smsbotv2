@@ -186,3 +186,8 @@ npx @claude-flow/cli@latest doctor --fix
 
 - Documentation: https://github.com/ruvnet/claude-flow
 - Issues: https://github.com/ruvnet/claude-flow/issues
+
+
+## Source of Truth
+- PRD and AI Build Spec: docs/prd_and_ai_build_spec.md
+- Roadmap and Agents: docs/roadmap_and_agents.md
