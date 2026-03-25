@@ -1,0 +1,45 @@
+---
+/**
+ * OAuth callback handler.
+ * Supabase redirects here after Google sign-in.
+ * Extracts tokens from URL hash and sets secure cookies.
+ */
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Authenticating...</title>
+  </head>
+  <body>
+    <p>Signing in...</p>
+
+    <script>
+      import { createClient } from '@supabase/supabase-js';
+
+      const supabase = createClient(
+        import.meta.env.PUBLIC_SUPABASE_URL ?? '',
+        import.meta.env.PUBLIC_SUPABASE_ANON_KEY ?? '',
+      );
+
+      async function handleCallback() {
+        const { data, error } = await supabase.auth.getSession();
+
+        if (error || !data.session) {
+          console.error('Auth callback error:', error?.message);
+          window.location.href = '/login';
+          return;
+        }
+
+        // Set cookies for SSR auth
+        document.cookie = `sb-access-token=${data.session.access_token}; path=/; max-age=3600; SameSite=Lax; Secure`;
+        document.cookie = `sb-refresh-token=${data.session.refresh_token}; path=/; max-age=604800; SameSite=Lax; Secure`;
+
+        window.location.href = '/dashboard';
+      }
+
+      handleCallback();
+    </script>
+  </body>
+</html>

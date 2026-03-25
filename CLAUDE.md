@@ -188,6 +188,22 @@ npx @claude-flow/cli@latest doctor --fix
 - Issues: https://github.com/ruvnet/claude-flow/issues
 
 
+## Project Summary
+This is a multi-workspace SMS chatbot management platform for agencies and businesses...
+
 ## Source of Truth
 - PRD and AI Build Spec: docs/prd_and_ai_build_spec.md
 - Roadmap and Agents: docs/roadmap_and_agents.md
+
+## Tech Stack
+- Astro
+- Supabase
+- Twilio
+- Calendly
+- OpenAI/Anthropic
+
+## Rules
+- Do not change DB schema without updating docs/data-model.md
+- Do not add integrations without documenting auth flow
+- Prefer serverless functions for provider webhooks
+- Preserve workspace isolation in all queries

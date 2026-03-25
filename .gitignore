@@ -1,3 +1,11 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+.astro/
+.netlify/
 
 # Codex local configuration
 .codex/
@@ -16,3 +24,21 @@
 .env
 .env.local
 .env.*.local
+.env.production
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Supabase local
+supabase/.temp/

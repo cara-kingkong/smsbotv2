@@ -1,0 +1,29 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+  directory = "netlify/functions"
+
+# Background functions live alongside regular functions
+# Netlify auto-detects *-background.ts naming convention
+
+[dev]
+  command = "npm run dev"
+  port = 4321
+  targetPort = 4321
+
+# Environment variable placeholders — set in Netlify UI or .env
+# SUPABASE_URL
+# SUPABASE_ANON_KEY
+# SUPABASE_SERVICE_ROLE_KEY
+# TWILIO_ACCOUNT_SID
+# TWILIO_AUTH_TOKEN
+# TWILIO_PHONE_NUMBER
+# OPENAI_API_KEY
+# ANTHROPIC_API_KEY
+# CALENDLY_API_KEY
+# KEAP_API_KEY
+# KEAP_APP_ID

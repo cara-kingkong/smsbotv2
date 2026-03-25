@@ -1,0 +1,120 @@
+import type { Context } from '@netlify/functions';
+import { getServiceClient } from '../../src/lib/db/client';
+import { ConversationService } from '../../src/lib/conversations/service';
+import { MessagingService } from '../../src/lib/messaging/service';
+import { AIService } from '../../src/lib/ai/service';
+import { AgentService } from '../../src/lib/agents/service';
+import { LeadService } from '../../src/lib/leads/service';
+import { BookingService } from '../../src/lib/calendar/service';
+import { QueueService } from '../../src/lib/queues/service';
+import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
+import { OpenAIAdapter } from '../../src/lib/ai/adapters/openai';
+import { AnthropicAdapter } from '../../src/lib/ai/adapters/anthropic';
+import { ConversationStatus, SenderType } from '../../src/lib/types';
+import type { AIProviderAdapter } from '../../src/lib/types';
+
+/**
+ * Background function: Generate AI reply and send SMS.
+ * Netlify auto-detects *-background naming convention.
+ */
+export default async (req: Request, _context: Context) => {
+  const db = getServiceClient();
+
+  try {
+    const { conversation_id } = await req.json() as { conversation_id: string };
+
+    const conversationService = new ConversationService(db);
+    const conversation = await conversationService.getById(conversation_id);
+
+    if (!conversation) {
+      console.error(`Conversation not found: ${conversation_id}`);
+      return new Response('Not found', { status: 404 });
+    }
+
+    // Skip if human-controlled or terminal
+    if (conversation.human_controlled || conversation.status === ConversationStatus.Completed || conversation.status === ConversationStatus.OptedOut) {
+      return new Response('Skipped', { status: 200 });
+    }
+
+    // Load dependencies
+    const agentService = new AgentService(db);
+    const leadService = new LeadService(db);
+    const twilioAdapter = new TwilioAdapter(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
+    const messagingService = new MessagingService(db, twilioAdapter);
+
+    const version = await agentService.getActiveVersion(conversation.agent_id);
+    if (!version) throw new Error(`No active version for agent ${conversation.agent_id}`);
+
+    const lead = await leadService.getById(conversation.lead_id);
+    if (!lead) throw new Error(`Lead not found: ${conversation.lead_id}`);
+
+    // Get message history
+    const history = await messagingService.getHistory(conversation_id);
+
+    // Determine AI provider
+    const aiAdapters = new Map<string, AIProviderAdapter>();
+    if (process.env.OPENAI_API_KEY) aiAdapters.set('openai', new OpenAIAdapter(process.env.OPENAI_API_KEY));
+    if (process.env.ANTHROPIC_API_KEY) aiAdapters.set('anthropic', new AnthropicAdapter(process.env.ANTHROPIC_API_KEY));
+
+    const aiService = new AIService(db, aiAdapters);
+
+    // Get calendars for agent
+    const bookingService = new BookingService(db, null as never); // Calendar adapter not needed for ID list
+    const calendars = await bookingService.getCalendarsForAgent(conversation.agent_id);
+
+    // Generate AI decision
+    const decision = await aiService.generateReply({
+      agent_version: version,
+      conversation_history: history,
+      lead,
+      available_calendar_ids: calendars.map((c) => c.id),
+      provider_key: 'openai', // Default; resolve from integration later
+    });
+
+    // Log AI decision event
+    await db.from('conversation_events').insert({
+      conversation_id,
+      event_type: 'ai_reply_generated',
+      event_payload_json: decision,
+    });
+
+    // Handle escalation
+    if (decision.escalate_to_human) {
+      await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
+      return new Response('Escalated', { status: 200 });
+    }
+
+    // Send reply if AI says to
+    if (decision.should_reply && decision.reply_text) {
+      await messagingService.sendOutbound({
+        conversation_id,
+        to: lead.phone_e164,
+        from: process.env.TWILIO_PHONE_NUMBER!,
+        body_text: decision.reply_text,
+        sender_type: SenderType.AI,
+      });
+
+      await conversationService.updateStatus(conversation_id, ConversationStatus.WaitingForLead);
+    }
+
+    // Handle booking recommendation
+    if (decision.should_book && decision.recommended_calendar_id) {
+      const queueService = new QueueService(db);
+      await queueService.enqueue({
+        job_type: 'process_booking',
+        queue_name: 'booking',
+        payload: {
+          conversation_id,
+          recommended_calendar_id: decision.recommended_calendar_id,
+          lead_id: lead.id,
+          agent_id: conversation.agent_id,
+        },
+      });
+    }
+
+    return new Response('OK', { status: 200 });
+  } catch (err) {
+    console.error('process-ai-reply-background error:', err);
+    return new Response('Error', { status: 500 });
+  }
+};
