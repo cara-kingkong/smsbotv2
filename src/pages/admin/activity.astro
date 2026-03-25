@@ -1,0 +1,13 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import ActivityLog from '@components/ActivityLog.vue';
+---
+
+<BaseLayout title="Activity Log">
+  <div class="mb-6">
+    <h1 class="text-2xl font-semibold">Activity Log</h1>
+    <p class="text-sm text-slate-400 mt-1">Audit trail of user and system actions</p>
+  </div>
+
+  <ActivityLog client:load />
+</BaseLayout>

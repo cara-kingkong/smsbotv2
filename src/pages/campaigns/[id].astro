@@ -1,0 +1,16 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import AgentManager from '@components/AgentManager.vue';
+
+const { id } = Astro.params;
+---
+
+<BaseLayout title="Campaign Agents">
+  <div class="mb-6">
+    <a href="/campaigns" class="text-sm text-blue-400 hover:text-blue-300">&larr; Back to Campaigns</a>
+    <h1 class="text-2xl font-semibold mt-2">Campaign Agents</h1>
+    <p class="text-sm text-slate-400 mt-1">Manage agents and prompt versions for this campaign</p>
+  </div>
+
+  <AgentManager client:load campaignId={id} campaignName="" />
+</BaseLayout>

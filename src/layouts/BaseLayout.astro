@@ -6,6 +6,23 @@ interface Props {
 
 const { title, requireAuth = false } = Astro.props;
 const currentPath = Astro.url.pathname;
+
+const mainNav = [
+  { href: '/dashboard', label: 'Dashboard' },
+  { href: '/campaigns', label: 'Campaigns' },
+  { href: '/conversations', label: 'Conversations' },
+];
+
+const adminNav = [
+  { href: '/admin/leads', label: 'Leads' },
+  { href: '/admin/webhooks', label: 'Webhooks' },
+  { href: '/admin/jobs', label: 'Job Queue' },
+  { href: '/admin/activity', label: 'Activity Log' },
+];
+
+const bottomNav = [
+  { href: '/settings', label: 'Settings' },
+];
 ---
 
 <!doctype html>
@@ -25,13 +42,9 @@ const currentPath = Astro.url.pathname;
         <div class="px-6 py-5 border-b border-slate-700 text-xl font-bold text-blue-500">
           RuFlo SMS
         </div>
-        <nav class="flex-1 py-4">
-          {[
-            { href: '/dashboard', label: 'Dashboard' },
-            { href: '/campaigns', label: 'Campaigns' },
-            { href: '/conversations', label: 'Conversations' },
-            { href: '/settings', label: 'Settings' },
-          ].map(link => (
+        <nav class="flex-1 py-4 flex flex-col">
+          <!-- Main navigation -->
+          {mainNav.map(link => (
             <a
               href={link.href}
               class:list={[
@@ -44,6 +57,44 @@ const currentPath = Astro.url.pathname;
               {link.label}
             </a>
           ))}
+
+          <!-- Admin section -->
+          <div class="mt-6 mb-1 px-6">
+            <span class="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Admin</span>
+          </div>
+          {adminNav.map(link => (
+            <a
+              href={link.href}
+              class:list={[
+                'block px-6 py-2.5 text-sm transition-colors',
+                currentPath.startsWith(link.href)
+                  ? 'text-slate-100 bg-surface-hover font-medium'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-surface-hover',
+              ]}
+            >
+              {link.label}
+            </a>
+          ))}
+
+          <!-- Spacer -->
+          <div class="flex-1"></div>
+
+          <!-- Bottom nav -->
+          <div class="border-t border-slate-700 pt-2">
+            {bottomNav.map(link => (
+              <a
+                href={link.href}
+                class:list={[
+                  'block px-6 py-2.5 text-sm transition-colors',
+                  currentPath.startsWith(link.href)
+                    ? 'text-slate-100 bg-surface-hover font-medium'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-surface-hover',
+                ]}
+              >
+                {link.label}
+              </a>
+            ))}
+          </div>
         </nav>
       </aside>
 

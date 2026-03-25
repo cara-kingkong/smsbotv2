@@ -1,0 +1,13 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import WebhookViewer from '@components/WebhookViewer.vue';
+---
+
+<BaseLayout title="Webhook Receipts">
+  <div class="mb-6">
+    <h1 class="text-2xl font-semibold">Webhook Receipts</h1>
+    <p class="text-sm text-slate-400 mt-1">View inbound webhook payloads and processing status</p>
+  </div>
+
+  <WebhookViewer client:load />
+</BaseLayout>

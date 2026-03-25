@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '@layouts/BaseLayout.astro';
+import CampaignManager from '@components/CampaignManager.vue';
 ---
 
 <BaseLayout title="Campaigns">
@@ -8,13 +9,5 @@ import BaseLayout from '@layouts/BaseLayout.astro';
     <p class="text-sm text-slate-400 mt-1">Manage your SMS chatbot campaigns and agent configurations</p>
   </div>
 
-  <div class="mb-6">
-    <button class="px-4 py-2 rounded-lg text-sm font-medium bg-blue-500 text-white hover:bg-blue-600" id="create-campaign">+ New Campaign</button>
-  </div>
-
-  <div id="campaigns-list" class="bg-surface border border-slate-700 rounded-lg p-6">
-    <p class="text-sm text-slate-400">
-      No campaigns yet. Create your first campaign to get started.
-    </p>
-  </div>
+  <CampaignManager client:load />
 </BaseLayout>

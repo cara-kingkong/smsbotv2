@@ -1,0 +1,13 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import JobQueue from '@components/JobQueue.vue';
+---
+
+<BaseLayout title="Job Queue">
+  <div class="mb-6">
+    <h1 class="text-2xl font-semibold">Job Queue</h1>
+    <p class="text-sm text-slate-400 mt-1">Monitor pending, running, failed, and dead-lettered jobs</p>
+  </div>
+
+  <JobQueue client:load />
+</BaseLayout>
