@@ -4,7 +4,9 @@ import { BookingService } from '../../src/lib/calendar/service';
 import { ConversationService } from '../../src/lib/conversations/service';
 import { LeadService } from '../../src/lib/leads/service';
 import { CalendlyAdapter } from '../../src/lib/calendar/adapters/calendly';
-import { ConversationOutcome, ConversationStatus } from '../../src/lib/types';
+import { ConversationOutcome, ConversationStatus, CRMEventType } from '../../src/lib/types';
+import { CRMService } from '../../src/lib/crm/service';
+import { QueueService } from '../../src/lib/queues/service';
 
 /**
  * Background function: Validate and execute booking.
@@ -54,6 +56,47 @@ export default async (req: Request, _context: Context) => {
     // Update conversation outcome
     await conversationService.setOutcome(conversation_id, ConversationOutcome.Booked);
     await conversationService.updateStatus(conversation_id, ConversationStatus.Completed);
+
+    // Emit CRM event for booking outcome
+    const { data: conversation } = await db
+      .from('conversations')
+      .select('workspace_id')
+      .eq('id', conversation_id)
+      .single();
+
+    if (conversation) {
+      const { data: crmIntegration } = await db
+        .from('integrations')
+        .select('id, provider')
+        .eq('workspace_id', conversation.workspace_id)
+        .eq('type', 'crm')
+        .eq('status', 'active')
+        .limit(1)
+        .single();
+
+      if (crmIntegration && lead.external_contact_id) {
+        const crmService = new CRMService(db, new Map());
+        const crmEvent = await crmService.emitEvent({
+          workspace_id: conversation.workspace_id,
+          conversation_id,
+          integration_id: crmIntegration.id,
+          event_type: CRMEventType.ConversationBooked,
+          external_contact_id: lead.external_contact_id,
+          payload: {
+            external_contact_id: lead.external_contact_id,
+            tag_name: 'booked',
+            note_body: 'Lead booked via SMS chatbot',
+          },
+        });
+
+        const queueService = new QueueService(db);
+        await queueService.enqueue({
+          job_type: 'process_crm_sync',
+          queue_name: 'crm',
+          payload: { crm_event_id: crmEvent.id, provider: crmIntegration.provider },
+        });
+      }
+    }
 
     return new Response('OK', { status: 200 });
   } catch (err) {

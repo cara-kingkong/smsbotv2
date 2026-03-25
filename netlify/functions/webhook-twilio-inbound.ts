@@ -3,7 +3,8 @@ import { getServiceClient } from '../../src/lib/db/client';
 import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
 import { MessagingService } from '../../src/lib/messaging/service';
 import { QueueService } from '../../src/lib/queues/service';
-import { ConversationStatus } from '../../src/lib/types';
+import { ConversationStatus, CRMEventType } from '../../src/lib/types';
+import { CRMService } from '../../src/lib/crm/service';
 
 /**
  * Twilio inbound SMS webhook.
@@ -47,7 +48,7 @@ export default async (req: Request, _context: Context) => {
     // Find active conversation by inbound phone number
     const { data: lead } = await db
       .from('leads')
-      .select('id, workspace_id')
+      .select('id, workspace_id, external_contact_id')
       .eq('phone_e164', inbound.from)
       .limit(1)
       .single();
@@ -90,6 +91,42 @@ export default async (req: Request, _context: Context) => {
     if (optOutKeywords.includes(inbound.body.trim().toLowerCase())) {
       await db.from('conversations').update({ status: ConversationStatus.OptedOut, outcome: 'opted_out' }).eq('id', conversation.id);
       await db.from('leads').update({ opted_out: true }).eq('id', lead.id);
+
+      // Emit CRM event for opt-out
+      if (lead.external_contact_id) {
+        const { data: crmIntegration } = await db
+          .from('integrations')
+          .select('id, provider')
+          .eq('workspace_id', lead.workspace_id)
+          .eq('type', 'crm')
+          .eq('status', 'active')
+          .limit(1)
+          .single();
+
+        if (crmIntegration) {
+          const crmService = new CRMService(db, new Map());
+          const crmEvent = await crmService.emitEvent({
+            workspace_id: lead.workspace_id,
+            conversation_id: conversation.id,
+            integration_id: crmIntegration.id,
+            event_type: CRMEventType.ConversationOptedOut,
+            external_contact_id: lead.external_contact_id,
+            payload: {
+              external_contact_id: lead.external_contact_id,
+              tag_name: 'opted_out',
+              note_body: 'Lead opted out of SMS chatbot',
+            },
+          });
+
+          const queueService = new QueueService(db);
+          await queueService.enqueue({
+            job_type: 'process_crm_sync',
+            queue_name: 'crm',
+            payload: { crm_event_id: crmEvent.id, provider: crmIntegration.provider },
+          });
+        }
+      }
+
       return new Response('<Response></Response>', {
         status: 200,
         headers: { 'Content-Type': 'text/xml' },

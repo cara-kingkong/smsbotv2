@@ -11,7 +11,8 @@ import { QueueService } from '../../src/lib/queues/service';
 import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
 import { OpenAIAdapter } from '../../src/lib/ai/adapters/openai';
 import { AnthropicAdapter } from '../../src/lib/ai/adapters/anthropic';
-import { ConversationStatus, ConversationOutcome, SenderType } from '../../src/lib/types';
+import { ConversationStatus, ConversationOutcome, SenderType, CRMEventType, MessageDirection } from '../../src/lib/types';
+import { CRMService } from '../../src/lib/crm/service';
 import type { AIProviderAdapter } from '../../src/lib/types';
 import { isWithinBusinessHours, getNextBusinessHoursStart } from '../../src/lib/utils/business-hours';
 import { evaluateStopConditions } from '../../src/lib/utils/stop-conditions';
@@ -24,7 +25,26 @@ export default async (req: Request, _context: Context) => {
   const db = getServiceClient();
 
   try {
-    const { conversation_id } = await req.json() as { conversation_id: string };
+    const { conversation_id, trigger } = await req.json() as {
+      conversation_id: string;
+      trigger?: string;
+    };
+
+    // ── Follow-up guard: skip if lead has replied since scheduling ──
+    if (trigger === 'followup_scheduled') {
+      const { data: latestMsg } = await db
+        .from('messages')
+        .select('direction')
+        .eq('conversation_id', conversation_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (latestMsg?.direction === MessageDirection.Inbound) {
+        console.log(`Follow-up skipped for ${conversation_id}: lead already replied`);
+        return new Response('Skipped — lead replied', { status: 200 });
+      }
+    }
 
     const conversationService = new ConversationService(db);
     const conversation = await conversationService.getById(conversation_id);
@@ -177,6 +197,31 @@ export default async (req: Request, _context: Context) => {
         .limit(1);
 
       await conversationService.updateStatus(conversation_id, ConversationStatus.WaitingForLead);
+
+      // ── Schedule follow-up if under max_followups limit ─────────
+      const cadence = version.reply_cadence_json;
+      if (cadence && cadence.max_followups > 0 && cadence.followup_delay_seconds > 0) {
+        const { count: followupCount } = await db
+          .from('conversation_events')
+          .select('*', { count: 'exact', head: true })
+          .eq('conversation_id', conversation_id)
+          .eq('event_type', 'ai_reply_generated');
+
+        if ((followupCount ?? 0) < cadence.max_followups) {
+          const followupRunAt = new Date(Date.now() + cadence.followup_delay_seconds * 1000);
+          const queueService = new QueueService(db);
+          await queueService.enqueue({
+            job_type: 'generate_ai_reply',
+            queue_name: 'ai',
+            payload: { conversation_id, trigger: 'followup_scheduled' },
+            run_at: followupRunAt,
+            max_attempts: 1,
+          });
+          console.log(
+            `Follow-up ${(followupCount ?? 0) + 1}/${cadence.max_followups} scheduled for ${conversation_id} at ${followupRunAt.toISOString()}`
+          );
+        }
+      }
     }
 
     // Handle booking recommendation
@@ -192,6 +237,56 @@ export default async (req: Request, _context: Context) => {
           agent_id: conversation.agent_id,
         },
       });
+    }
+
+    // Emit CRM events for qualification state changes and escalation
+    const crmEventType =
+      decision.qualification_state === 'qualified'
+        ? CRMEventType.ConversationQualified
+        : decision.qualification_state === 'unqualified'
+          ? CRMEventType.ConversationUnqualified
+          : decision.escalate_to_human
+            ? CRMEventType.ConversationNeedsHuman
+            : null;
+
+    if (crmEventType && lead.external_contact_id) {
+      const { data: crmIntegration } = await db
+        .from('integrations')
+        .select('id, provider')
+        .eq('workspace_id', conversation.workspace_id)
+        .eq('type', 'crm')
+        .eq('status', 'active')
+        .limit(1)
+        .single();
+
+      if (crmIntegration) {
+        const crmService = new CRMService(db, new Map());
+        const noteMap: Record<string, string> = {
+          [CRMEventType.ConversationQualified]: 'Lead qualified via SMS chatbot',
+          [CRMEventType.ConversationUnqualified]: 'Lead unqualified via SMS chatbot',
+          [CRMEventType.ConversationNeedsHuman]: 'Lead escalated to human via SMS chatbot',
+        };
+
+        const crmEvent = await crmService.emitEvent({
+          workspace_id: conversation.workspace_id,
+          conversation_id,
+          integration_id: crmIntegration.id,
+          event_type: crmEventType,
+          external_contact_id: lead.external_contact_id,
+          payload: {
+            external_contact_id: lead.external_contact_id,
+            tag_name: crmEventType.replace('conversation_', ''),
+            note_body: noteMap[crmEventType],
+          },
+        });
+
+        const crmQueueService = new QueueService(db);
+        await crmQueueService.enqueue({
+          job_type: 'process_crm_sync',
+          queue_name: 'crm',
+          payload: { crm_event_id: crmEvent.id, provider: crmIntegration.provider },
+        });
+      }
     }
 
     return new Response('OK', { status: 200 });
