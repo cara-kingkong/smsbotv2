@@ -1,0 +1,18 @@
+
+# Codex local configuration
+.codex/
+.mcp.json
+
+# Bundled agent tooling
+.agents/
+.claude/
+
+# Claude Flow: keep only shared config files
+.claude-flow/*
+!.claude-flow/.gitignore
+!.claude-flow/config.yaml
+
+# Environment variables
+.env
+.env.local
+.env.*.local
