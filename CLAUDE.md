@@ -188,10 +188,77 @@ npx @claude-flow/cli@latest doctor --fix
 - Issues: https://github.com/ruvnet/claude-flow/issues
 
 
+
 ## Project Summary
-This is a multi-workspace SMS chatbot management platform for agencies and businesses...
+
+This is a multi-workspace SMS chatbot platform designed for agencies managing multiple client accounts.
+
+The system enables:
+- AI-driven SMS conversations
+- Lead qualification
+- Calendar booking (Calendly)
+- CRM syncing (Keap/Infusionsoft initially)
+- Campaign-level A/B testing using multiple AI agents
+
+Each workspace represents a business or client account.
+
+---
+
+## Core Domains (DDD)
+
+### 1. Workspace
+- Represents a business entity
+- Contains users, campaigns, integrations
+- Must be strictly isolated
+
+### 2. Campaign
+- Defines chatbot behaviour
+- Contains:
+  - AI prompt
+  - assigned agents (for split testing)
+  - success criteria (booking, lead, etc.)
+
+### 3. Agent
+- AI configuration for a campaign
+- Includes:
+  - system prompt
+  - behaviour rules
+  - temperature/model settings
+- Multiple agents can be assigned to one campaign
+
+### 4. Conversation
+- Represents an SMS thread with a lead
+- Stores:
+  - messages
+  - state (active, qualified, booked, lost)
+  - assigned agent
+- Can be manually overridden by a user
+
+### 5. Integration
+- External services connected per workspace:
+  - Twilio (SMS)
+  - Calendly (booking)
+  - CRM (Keap initially)
+- Must support per-workspace credentials
+
+---
+
+## System Flow
+
+1. Incoming SMS via Twilio
+2. Match phone number → workspace + campaign
+3. Assign agent (A/B testing logic)
+4. Generate AI response using prompt + context
+5. Update conversation state
+6. If criteria met:
+   - trigger booking OR
+   - push lead to CRM
+7. Store all events for analytics
+
+---
 
 ## Source of Truth
+
 - PRD and AI Build Spec: docs/prd_and_ai_build_spec.md
 - Roadmap and Agents: docs/roadmap_and_agents.md
 - API Contracts: docs/api-contracts.md
@@ -199,15 +266,70 @@ This is a multi-workspace SMS chatbot management platform for agencies and busin
 - Database Schema: docs/database-schema.md
 - PRD: docs/prd.md
 
-## Tech Stack
-- Astro
-- Supabase
-- Twilio
-- Calendly
-- OpenAI/Anthropic
+---
 
-## Rules
-- Do not change DB schema without updating docs/data-model.md
-- Do not add integrations without documenting auth flow
-- Prefer serverless functions for provider webhooks
-- Preserve workspace isolation in all queries
+## Tech Stack
+
+- Astro (frontend + serverless routes)
+- Supabase (database + auth)
+- Twilio (SMS)
+- Calendly (booking)
+- OpenAI / Anthropic (AI engine)
+
+---
+
+## Architecture Rules
+
+- Follow Domain-Driven Design with strict bounded contexts
+- All queries MUST be scoped to workspace_id
+- Use event-driven architecture for conversation updates
+- All integrations must be abstracted behind adapters
+- Prefer serverless functions for all external webhooks
+
+---
+
+## Data Rules
+
+- Do not change DB schema without updating docs/database-schema.md
+- All entities must include:
+  - id (UUID)
+  - workspace_id
+  - created_at / updated_at
+- Conversations must be append-only (event sourcing preferred)
+
+---
+
+## AI Behaviour Rules
+
+- AI must operate within campaign-defined prompts
+- AI must NOT hallucinate actions (e.g. bookings) without confirmation
+- AI must follow qualification logic before booking
+- Responses should be short, SMS-friendly, human-like
+
+---
+
+## Security Rules
+
+- Never expose API keys client-side
+- All integrations must use secure credential storage
+- Enforce workspace isolation at database and API level
+- Validate all webhook inputs
+
+---
+
+## Development Rules
+
+- Use `/src` for code
+- Use `/docs` for documentation
+- Use `/tests` for tests
+- Keep files under 500 lines
+- Use typed interfaces for APIs
+
+---
+
+## Build & Test
+
+```bash
+npm run build
+npm test
+npm run lint
