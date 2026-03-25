@@ -3,8 +3,8 @@
 -- ============================================================
 
 -- Enable required extensions
-create extension if not exists "uuid-ossp";
-create extension if not exists "pgcrypto";
+create extension if not exists "uuid-ossp" schema extensions;
+create extension if not exists "pgcrypto" schema extensions;
 
 -- ─── Custom Types ────────────────────────────────────────────
 
@@ -29,7 +29,7 @@ create type crm_sync_status as enum ('pending', 'sent', 'failed', 'retrying');
 -- ─── Workspaces ──────────────────────────────────────────────
 
 create table workspaces (
-  id          uuid primary key default uuid_generate_v4(),
+  id          uuid primary key default extensions.uuid_generate_v4(),
   name        text not null,
   slug        text not null unique,
   status      entity_status not null default 'active',
@@ -51,7 +51,7 @@ create table users (
 -- ─── Workspace Membership ────────────────────────────────────
 
 create table workspace_users (
-  id            uuid primary key default uuid_generate_v4(),
+  id            uuid primary key default extensions.uuid_generate_v4(),
   workspace_id  uuid not null references workspaces(id) on delete cascade,
   user_id       uuid not null references users(id) on delete cascade,
   role          workspace_role not null default 'admin',
@@ -62,7 +62,7 @@ create table workspace_users (
 -- ─── Integrations ────────────────────────────────────────────
 
 create table integrations (
-  id            uuid primary key default uuid_generate_v4(),
+  id            uuid primary key default extensions.uuid_generate_v4(),
   workspace_id  uuid not null references workspaces(id) on delete cascade,
   type          integration_type not null,
   provider      integration_provider not null,
@@ -78,7 +78,7 @@ create index idx_integrations_workspace on integrations(workspace_id);
 -- ─── Campaigns ───────────────────────────────────────────────
 
 create table campaigns (
-  id                    uuid primary key default uuid_generate_v4(),
+  id                    uuid primary key default extensions.uuid_generate_v4(),
   workspace_id          uuid not null references workspaces(id) on delete cascade,
   name                  text not null,
   status                entity_status not null default 'active',
@@ -94,7 +94,7 @@ create index idx_campaigns_workspace on campaigns(workspace_id);
 -- ─── Agents ──────────────────────────────────────────────────
 
 create table agents (
-  id                          uuid primary key default uuid_generate_v4(),
+  id                          uuid primary key default extensions.uuid_generate_v4(),
   campaign_id                 uuid not null references campaigns(id) on delete cascade,
   name                        text not null,
   status                      entity_status not null default 'active',
@@ -110,7 +110,7 @@ create index idx_agents_campaign on agents(campaign_id);
 -- ─── Agent Versions ──────────────────────────────────────────
 
 create table agent_versions (
-  id                uuid primary key default uuid_generate_v4(),
+  id                uuid primary key default extensions.uuid_generate_v4(),
   agent_id          uuid not null references agents(id) on delete cascade,
   version_number    integer not null,
   prompt_text       text not null default '',
@@ -127,7 +127,7 @@ create index idx_agent_versions_agent on agent_versions(agent_id);
 -- ─── Calendars ───────────────────────────────────────────────
 
 create table calendars (
-  id                      uuid primary key default uuid_generate_v4(),
+  id                      uuid primary key default extensions.uuid_generate_v4(),
   workspace_id            uuid not null references workspaces(id) on delete cascade,
   integration_id          uuid not null references integrations(id) on delete cascade,
   name                    text not null,
@@ -142,7 +142,7 @@ create index idx_calendars_workspace on calendars(workspace_id);
 -- ─── Agent ↔ Calendar ────────────────────────────────────────
 
 create table agent_calendars (
-  id          uuid primary key default uuid_generate_v4(),
+  id          uuid primary key default extensions.uuid_generate_v4(),
   agent_id    uuid not null references agents(id) on delete cascade,
   calendar_id uuid not null references calendars(id) on delete cascade,
   unique(agent_id, calendar_id)
@@ -151,7 +151,7 @@ create table agent_calendars (
 -- ─── Leads ───────────────────────────────────────────────────
 
 create table leads (
-  id                    uuid primary key default uuid_generate_v4(),
+  id                    uuid primary key default extensions.uuid_generate_v4(),
   workspace_id          uuid not null references workspaces(id) on delete cascade,
   external_contact_id   text,
   crm_provider          text,
@@ -173,7 +173,7 @@ create index idx_leads_phone on leads(workspace_id, phone_e164);
 -- ─── Conversations ───────────────────────────────────────────
 
 create table conversations (
-  id                uuid primary key default uuid_generate_v4(),
+  id                uuid primary key default extensions.uuid_generate_v4(),
   workspace_id      uuid not null references workspaces(id) on delete cascade,
   campaign_id       uuid not null references campaigns(id),
   agent_id          uuid not null references agents(id),
@@ -198,7 +198,7 @@ create index idx_conversations_status on conversations(workspace_id, status);
 -- ─── Messages ────────────────────────────────────────────────
 
 create table messages (
-  id                  uuid primary key default uuid_generate_v4(),
+  id                  uuid primary key default extensions.uuid_generate_v4(),
   conversation_id     uuid not null references conversations(id) on delete cascade,
   direction           message_direction not null,
   sender_type         sender_type not null,
@@ -216,7 +216,7 @@ create index idx_messages_conversation on messages(conversation_id);
 -- ─── Conversation Events ─────────────────────────────────────
 
 create table conversation_events (
-  id                  uuid primary key default uuid_generate_v4(),
+  id                  uuid primary key default extensions.uuid_generate_v4(),
   conversation_id     uuid not null references conversations(id) on delete cascade,
   event_type          text not null,
   event_payload_json  jsonb not null default '{}',
@@ -228,7 +228,7 @@ create index idx_conversation_events_conversation on conversation_events(convers
 -- ─── CRM Events ──────────────────────────────────────────────
 
 create table crm_events (
-  id                    uuid primary key default uuid_generate_v4(),
+  id                    uuid primary key default extensions.uuid_generate_v4(),
   workspace_id          uuid not null references workspaces(id) on delete cascade,
   conversation_id       uuid not null references conversations(id),
   integration_id        uuid not null references integrations(id),
@@ -246,7 +246,7 @@ create index idx_crm_events_status on crm_events(status);
 -- ─── Webhook Receipts ────────────────────────────────────────
 
 create table webhook_receipts (
-  id                uuid primary key default uuid_generate_v4(),
+  id                uuid primary key default extensions.uuid_generate_v4(),
   workspace_id      uuid not null references workspaces(id) on delete cascade,
   source_type       text not null,
   source_identifier text not null default '',
@@ -261,7 +261,7 @@ create unique index idx_webhook_receipts_idempotency on webhook_receipts(workspa
 -- ─── Jobs (Queue) ────────────────────────────────────────────
 
 create table jobs (
-  id              uuid primary key default uuid_generate_v4(),
+  id              uuid primary key default extensions.uuid_generate_v4(),
   job_type        text not null,
   queue_name      text not null default 'default',
   status          job_status not null default 'pending',
@@ -279,7 +279,7 @@ create index idx_jobs_queue_status on jobs(queue_name, status, run_at);
 -- ─── Activity Log ────────────────────────────────────────────
 
 create table activity_logs (
-  id            uuid primary key default uuid_generate_v4(),
+  id            uuid primary key default extensions.uuid_generate_v4(),
   workspace_id  uuid not null references workspaces(id) on delete cascade,
   user_id       uuid references users(id),
   entity_type   text not null,
