@@ -194,6 +194,10 @@ This is a multi-workspace SMS chatbot management platform for agencies and busin
 ## Source of Truth
 - PRD and AI Build Spec: docs/prd_and_ai_build_spec.md
 - Roadmap and Agents: docs/roadmap_and_agents.md
+- API Contracts: docs/api-contracts.md
+- Integration Adapters: docs/integration-adapters.md
+- Database Schema: docs/database-schema.md
+- PRD: docs/prd.md
 
 ## Tech Stack
 - Astro
