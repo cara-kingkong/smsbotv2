@@ -1,5 +1,6 @@
 ---
 import { getPublicSupabaseConfig } from '@lib/config/public-server';
+import '../styles/global.css';
 
 // Middleware skips /login — check if already authenticated to redirect
 const existingSession = (Astro.locals as Record<string, unknown>).session;
@@ -8,62 +9,100 @@ const publicConfig = getPublicSupabaseConfig();
 ---
 
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sign In | Kong SMS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
     <script define:vars={{ publicConfig }}>
       window.__KONG_PUBLIC_CONFIG__ = publicConfig;
     </script>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background: #0f172a;
-        color: #f1f5f9;
-        min-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .login-card {
-        background: #1e293b;
-        border: 1px solid #334155;
-        border-radius: 8px;
-        padding: 3rem;
-        width: 100%;
-        max-width: 400px;
-        text-align: center;
-      }
-      .login-card h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
-      .login-card p { color: #94a3b8; font-size: 0.875rem; margin-bottom: 2rem; }
-      .btn-google {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.75rem 1.5rem;
-        background: white;
-        color: #1f2937;
-        border: none;
-        border-radius: 8px;
-        font-size: 0.875rem;
-        font-weight: 500;
-        cursor: pointer;
-        width: 100%;
-        justify-content: center;
-      }
-      .btn-google:hover { background: #f3f4f6; }
-    </style>
   </head>
   <body>
-    <div class="login-card">
-      <h1>Kong SMS</h1>
-      <p>Sign in to manage your SMS chatbot campaigns</p>
-      <button class="btn-google" id="google-signin">
-        Sign in with Google
-      </button>
-    </div>
+    <main class="login-shell">
+      <section class="hidden lg:block">
+        <div class="login-showcase">
+          <div class="app-window-controls">
+            <span class="app-window-dot app-window-dot-red"></span>
+            <span class="app-window-dot app-window-dot-yellow"></span>
+            <span class="app-window-dot app-window-dot-green"></span>
+          </div>
+          <p class="login-kicker">Operations Control Center</p>
+          <h1 class="login-title">A calmer, more structured workspace for SMS operations.</h1>
+          <p class="login-copy">
+            Review inbox activity, compare campaign performance, and manage workspace settings from one clean operating surface.
+          </p>
+
+          <div class="login-proof-grid">
+            <div class="login-proof-card">
+              <div class="login-proof-value">Inbox</div>
+              <div class="login-proof-label">Live triage</div>
+              <p class="login-proof-copy">Move from workspace-level signals into the exact conversation that needs manual attention.</p>
+            </div>
+            <div class="login-proof-card">
+              <div class="login-proof-value">Campaigns</div>
+              <div class="login-proof-label">Campaign control</div>
+              <p class="login-proof-copy">Tune prompts, compare agents, and review conversion performance without leaving the workspace.</p>
+            </div>
+            <div class="login-proof-card">
+              <div class="login-proof-value">Workspace</div>
+              <div class="login-proof-label">Workspace access</div>
+              <p class="login-proof-copy">Authentication and workspace context stay secured server-side before protected routes render.</p>
+            </div>
+          </div>
+
+          <div class="login-bullets">
+            <div class="login-bullet">Conversation state, campaign settings, and integrations follow one consistent operating model.</div>
+            <div class="login-bullet">Built for agency teams managing multiple clients, handoffs, and AI-assisted workflows.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="auth-card">
+        <div class="mb-8">
+          <p class="page-kicker">Welcome Back</p>
+          <h1 class="page-title text-[2.4rem] sm:text-[2.7rem]">Sign in</h1>
+          <p class="page-subtitle max-w-none">
+            Access your workspace to manage conversations, review campaign performance, and keep operator handoff under control.
+          </p>
+        </div>
+
+        <div class="auth-logo-card">
+          <div class="flex items-center gap-3">
+            <div class="app-brand-mark">KS</div>
+            <div>
+              <div class="section-title text-lg">Kong SMS</div>
+              <p class="section-copy">Secure Google sign-in for authenticated workspace access.</p>
+            </div>
+          </div>
+        </div>
+
+        <button class="button-primary mt-6 w-full" id="google-signin">
+          Continue with Google
+        </button>
+
+        <div class="auth-trust-list">
+          <div class="auth-trust-item">
+            <span class="auth-trust-dot"></span>
+            <div>Google OAuth redirects back through <span class="font-semibold text-slate-800">/auth/callback</span> after successful sign-in.</div>
+          </div>
+          <div class="auth-trust-item">
+            <span class="auth-trust-dot"></span>
+            <div>Workspace access stays authenticated server-side before protected routes render.</div>
+          </div>
+          <div class="auth-trust-item">
+            <span class="auth-trust-dot"></span>
+            <div>Use the same login to reach dashboard reporting, campaign controls, and the shared inbox.</div>
+          </div>
+        </div>
+      </section>
+    </main>
 
     <script>
       import { createClient } from '@supabase/supabase-js';

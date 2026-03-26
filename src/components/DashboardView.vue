@@ -1,126 +1,216 @@
 <template>
-  <div>
-    <!-- Stats grid -->
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
-      <div
-        v-for="stat in statCards"
-        :key="stat.key"
-        class="bg-surface border border-slate-700 rounded-lg p-4"
-        :class="stat.clickable ? 'cursor-pointer hover:border-blue-500 transition-colors' : ''"
-        @click="stat.clickable ? goToConversations() : undefined"
-      >
-        <div class="text-[11px] uppercase tracking-wider text-slate-400">{{ stat.label }}</div>
-        <div class="text-2xl font-bold mt-1">{{ stats[stat.key] ?? '--' }}</div>
-      </div>
-    </div>
+  <div class="space-y-8">
+    <section class="hero-panel">
+      <div class="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
+        <div>
+          <div class="page-kicker">Workspace Pulse</div>
+          <h2 class="section-title mt-3 text-[1.75rem] sm:text-[2rem]">
+            Daily operating view for conversation load, team handoffs, and booking output.
+          </h2>
+          <p class="section-copy mt-3 max-w-2xl">
+            Use the dashboard to see what is converting, what needs a human, and where campaign volume is building before you drill into the inbox.
+          </p>
 
-    <!-- Campaign Performance -->
-    <div v-if="campaigns.length > 0" class="mb-8 space-y-4">
-      <h2 class="text-lg font-semibold">Campaign Performance</h2>
+          <div class="mt-5 rounded-[16px] border border-slate-900/6 bg-slate-50/90 px-4 py-3 text-sm text-slate-500">
+            Latest snapshot across campaigns, live inbox activity, and operator follow-up.
+          </div>
 
-      <div
-        v-for="campaign in campaigns"
-        :key="campaign.campaign_id"
-        class="bg-surface border border-slate-700 rounded-lg p-5"
-      >
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="font-semibold text-base">{{ campaign.campaign_name }}</h3>
-          <div class="flex gap-4 text-sm text-slate-400">
-            <span>{{ campaign.total_conversations }} conversations</span>
-            <span>
-              Booking rate:
-              <span class="text-white font-medium">{{ formatPct(campaignBookingRate(campaign)) }}</span>
-            </span>
+          <div class="mt-6 grid gap-3 sm:grid-cols-3">
+            <div class="stat-card">
+              <div class="stat-label">Campaigns Tracked</div>
+              <div class="stat-value text-[2rem]">{{ campaigns.length }}</div>
+              <div class="stat-meta">Live reporting coverage across this workspace.</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Booking Rate</div>
+              <div class="stat-value text-[2rem]">{{ formatPct(bookedRate) }}</div>
+              <div class="stat-meta">Calculated from all tracked conversations.</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Needs Human</div>
+              <div class="stat-value text-[2rem]">{{ formatPct(attentionRate) }}</div>
+              <div class="stat-meta">Share of threads requiring operator follow-up.</div>
+            </div>
           </div>
         </div>
 
-        <div v-if="campaign.agent_metrics.length === 0" class="text-sm text-slate-400">
-          No agents assigned to this campaign yet.
+        <div class="panel-muted space-y-5">
+          <div>
+            <div class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Main Info</div>
+            <div class="mt-3 text-xl font-semibold tracking-tight text-slate-900">
+              {{ topCampaign?.campaign_name ?? 'No campaign data yet' }}
+            </div>
+            <p class="mt-2 text-sm leading-6 text-slate-600">
+              <template v-if="topCampaign">
+                Top campaign by current booking rate across the latest workspace metrics.
+              </template>
+              <template v-else>
+                This panel highlights the current top performer once reporting data is available.
+              </template>
+            </p>
+          </div>
+
+          <div class="divide-y divide-slate-200/70 rounded-[16px] border border-slate-200/70 bg-white/88">
+            <div class="flex items-center justify-between px-4 py-3 text-sm">
+              <span class="text-slate-500">Conversations</span>
+              <span class="font-semibold text-slate-900">{{ stats.total ?? 0 }}</span>
+            </div>
+            <div class="flex items-center justify-between px-4 py-3 text-sm">
+              <span class="text-slate-500">Booking rate</span>
+              <span class="font-semibold text-slate-900">{{ formatPct(bookedRate) }}</span>
+            </div>
+            <div class="flex items-center justify-between px-4 py-3 text-sm">
+              <span class="text-slate-500">Needs human</span>
+              <span class="font-semibold text-slate-900">{{ stats.needs_human ?? 0 }}</span>
+            </div>
+            <div class="flex items-center justify-between px-4 py-3 text-sm">
+              <span class="text-slate-500">Recent threads</span>
+              <span class="font-semibold text-slate-900">{{ conversations.length }}</span>
+            </div>
+          </div>
+
+          <div class="note-box">
+            Prioritise the inbox when human handoff climbs above the normal workspace baseline.
+          </div>
+
+          <button class="button-secondary w-full" @click="goToConversations">Open conversation inbox</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+      <div
+        v-for="stat in statCards"
+        :key="stat.key"
+        class="stat-card"
+        :class="stat.clickable ? 'stat-card-clickable cursor-pointer' : ''"
+        @click="stat.clickable ? goToConversations() : undefined"
+      >
+        <div class="stat-label">{{ stat.label }}</div>
+        <div class="stat-value">{{ stats[stat.key] ?? '--' }}</div>
+        <div class="stat-meta">{{ stat.description }}</div>
+      </div>
+    </section>
+
+    <section class="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]">
+      <div class="panel">
+        <div class="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 class="section-title">Campaign Performance</h2>
+            <p class="section-copy">Compare conversation volume and agent outcomes without leaving the main dashboard.</p>
+          </div>
+          <div class="page-badge">Performance by campaign</div>
         </div>
 
-        <table v-else class="w-full">
-          <thead>
-            <tr class="text-left">
-              <th class="text-[11px] uppercase tracking-wider text-slate-400 pb-2 px-3 border-b border-slate-700">Agent Name</th>
-              <th class="text-[11px] uppercase tracking-wider text-slate-400 pb-2 px-3 border-b border-slate-700">Conversations</th>
-              <th class="text-[11px] uppercase tracking-wider text-slate-400 pb-2 px-3 border-b border-slate-700">Booking Rate</th>
-              <th class="text-[11px] uppercase tracking-wider text-slate-400 pb-2 px-3 border-b border-slate-700">Opt-Out Rate</th>
-              <th class="text-[11px] uppercase tracking-wider text-slate-400 pb-2 px-3 border-b border-slate-700">Takeover Rate</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="agent in campaign.agent_metrics"
-              :key="agent.agent_id"
-              class="hover:bg-surface-hover transition-colors"
-            >
-              <td class="text-sm py-2.5 px-3 border-b border-slate-700/50">{{ agent.agent_name }}</td>
-              <td class="text-sm py-2.5 px-3 border-b border-slate-700/50 text-slate-400">{{ agent.total_conversations }}</td>
-              <td class="text-sm py-2.5 px-3 border-b border-slate-700/50">
-                <span
-                  class="text-[11px] px-2 py-0.5 rounded-full font-medium"
-                  :class="isBestBooking(campaign, agent) ? 'bg-green-500/15 text-green-400' : 'text-slate-300'"
-                >
-                  {{ formatPct(agent.booking_rate) }}
-                </span>
-              </td>
-              <td class="text-sm py-2.5 px-3 border-b border-slate-700/50 text-slate-400">{{ formatPct(agent.opt_out_rate) }}</td>
-              <td class="text-sm py-2.5 px-3 border-b border-slate-700/50 text-slate-400">{{ formatPct(agent.human_takeover_rate) }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-if="campaigns.length === 0" class="empty-state">
+          Campaign analytics will appear here once campaigns start receiving conversation volume.
+        </div>
+
+        <div v-else class="space-y-5">
+          <article
+            v-for="campaign in campaigns"
+            :key="campaign.campaign_id"
+            class="rounded-[24px] border border-slate-200/70 bg-white/78 p-5"
+          >
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h3 class="text-lg font-semibold tracking-tight text-slate-900">{{ campaign.campaign_name }}</h3>
+                <p class="mt-1 text-sm text-slate-600">
+                  {{ campaign.total_conversations }} conversations and
+                  <span class="font-semibold text-slate-900">{{ formatPct(campaignBookingRate(campaign)) }}</span> booking rate.
+                </p>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <span class="badge bg-emerald-50 text-emerald-700">Booked {{ campaign.booked }}</span>
+                <span class="badge bg-amber-50 text-amber-700">Qualified {{ campaign.qualified_not_booked }}</span>
+                <span class="badge bg-slate-100 text-slate-600">Active {{ campaign.active_conversations }}</span>
+              </div>
+            </div>
+
+            <div v-if="campaign.agent_metrics.length === 0" class="note-box mt-4">
+              No agents are assigned to this campaign yet.
+            </div>
+
+            <div v-else class="table-shell mt-4 overflow-x-auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Agent</th>
+                    <th>Conversations</th>
+                    <th>Booking Rate</th>
+                    <th>Opt-Out Rate</th>
+                    <th>Takeover Rate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="agent in campaign.agent_metrics" :key="agent.agent_id">
+                    <td class="font-semibold">{{ agent.agent_name }}</td>
+                    <td class="text-slate-600">{{ agent.total_conversations }}</td>
+                    <td>
+                      <span
+                        class="badge"
+                        :class="isBestBooking(campaign, agent) ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'"
+                      >
+                        {{ formatPct(agent.booking_rate) }}
+                      </span>
+                    </td>
+                    <td class="text-slate-600">{{ formatPct(agent.opt_out_rate) }}</td>
+                    <td class="text-slate-600">{{ formatPct(agent.human_takeover_rate) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
       </div>
-    </div>
 
-    <!-- Recent conversations -->
-    <div class="bg-surface border border-slate-700 rounded-lg p-5">
-      <h2 class="text-lg font-semibold mb-4">Recent Conversations</h2>
+      <div class="panel">
+        <div class="mb-5 flex items-end justify-between gap-3">
+          <div>
+            <h2 class="section-title">Recent Conversations</h2>
+            <p class="section-copy">Recent threads with the latest status and message preview.</p>
+          </div>
+        </div>
 
-      <div v-if="loading" class="text-sm text-slate-400">Loading...</div>
-      <div v-else-if="conversations.length === 0" class="text-sm text-slate-400">
-        No conversations yet. Conversations appear when leads are posted via webhook.
-      </div>
+        <div v-if="loading" class="empty-state min-h-[320px]">Loading workspace activity...</div>
+        <div v-else-if="conversations.length === 0" class="empty-state min-h-[320px]">
+          No conversations yet. New inbound leads will start appearing here automatically.
+        </div>
 
-      <table v-else class="w-full">
-        <thead>
-          <tr class="text-left">
-            <th class="text-[11px] uppercase tracking-wider text-slate-400 pb-2 px-3 border-b border-slate-700">Lead</th>
-            <th class="text-[11px] uppercase tracking-wider text-slate-400 pb-2 px-3 border-b border-slate-700">Phone</th>
-            <th class="text-[11px] uppercase tracking-wider text-slate-400 pb-2 px-3 border-b border-slate-700">Status</th>
-            <th class="text-[11px] uppercase tracking-wider text-slate-400 pb-2 px-3 border-b border-slate-700">Last Message</th>
-            <th class="text-[11px] uppercase tracking-wider text-slate-400 pb-2 px-3 border-b border-slate-700">Activity</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
+        <div v-else class="space-y-3">
+          <button
             v-for="conv in conversations"
             :key="conv.id"
-            class="cursor-pointer hover:bg-surface-hover transition-colors"
+            class="list-card"
             @click="goToConversations()"
           >
-            <td class="text-sm py-2.5 px-3 border-b border-slate-700/50">{{ leadName(conv) }}</td>
-            <td class="text-sm py-2.5 px-3 border-b border-slate-700/50 text-slate-400">{{ conv.lead?.phone_e164 ?? '' }}</td>
-            <td class="text-sm py-2.5 px-3 border-b border-slate-700/50">
-              <span class="text-[11px] px-2 py-0.5 rounded-full font-medium" :class="statusClass(conv.status)">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="text-sm font-semibold text-slate-900">{{ leadName(conv) }}</div>
+                <div class="mt-1 text-sm text-slate-500">{{ conv.lead?.phone_e164 ?? '' }}</div>
+              </div>
+              <span class="badge" :class="statusClass(conv.status)">
                 {{ conv.status.replace(/_/g, ' ') }}
               </span>
-            </td>
-            <td class="text-sm py-2.5 px-3 border-b border-slate-700/50 text-slate-400 max-w-[200px] truncate">
+            </div>
+            <p class="mt-4 text-sm leading-6 text-slate-600">
               {{ lastPreview(conv) }}
-            </td>
-            <td class="text-sm py-2.5 px-3 border-b border-slate-700/50 text-slate-400">{{ relativeTime(conv.last_activity_at) }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+            </p>
+            <div class="mt-4 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+              {{ relativeTime(conv.last_activity_at) }}
+            </div>
+          </button>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { getSessionContext } from '@lib/config/public-client';
 
-const API_BASE = '/.netlify/functions';
+const API_BASE = '/api';
 
 interface Conv {
   id: string;
@@ -160,13 +250,30 @@ const conversations = ref<Conv[]>([]);
 const campaigns = ref<CampaignMetric[]>([]);
 
 const statCards = [
-  { key: 'total', label: 'Total Conversations', clickable: false },
-  { key: 'active', label: 'Active', clickable: false },
-  { key: 'booked', label: 'Booked', clickable: false },
-  { key: 'qualified', label: 'Qualified', clickable: false },
-  { key: 'opted_out', label: 'Opt-Outs', clickable: false },
-  { key: 'needs_human', label: 'Needs Human', clickable: true },
+  { key: 'total', label: 'Total Conversations', clickable: false, description: 'All tracked conversation threads.' },
+  { key: 'active', label: 'Active', clickable: false, description: 'Currently open and progressing.' },
+  { key: 'booked', label: 'Booked', clickable: false, description: 'Leads that reached a booking outcome.' },
+  { key: 'qualified', label: 'Qualified', clickable: false, description: 'Qualified leads not yet booked.' },
+  { key: 'opted_out', label: 'Opt-Outs', clickable: false, description: 'Threads that exited after opt-out.' },
+  { key: 'needs_human', label: 'Needs Human', clickable: true, description: 'Open these directly from the inbox.' },
 ];
+
+const bookedRate = computed(() => {
+  const total = stats.value.total ?? 0;
+  if (!total) return 0;
+  return (stats.value.booked ?? 0) / total;
+});
+
+const attentionRate = computed(() => {
+  const total = stats.value.total ?? 0;
+  if (!total) return 0;
+  return (stats.value.needs_human ?? 0) / total;
+});
+
+const topCampaign = computed(() => {
+  if (!campaigns.value.length) return null;
+  return [...campaigns.value].sort((a, b) => campaignBookingRate(b) - campaignBookingRate(a))[0];
+});
 
 function formatPct(rate: number): string {
   return `${(rate * 100).toFixed(1)}%`;
@@ -192,27 +299,27 @@ function leadName(conv: Conv): string {
 
 function lastPreview(conv: Conv): string {
   const msg = conv.last_message?.[0]?.body_text ?? '--';
-  return msg.length > 60 ? msg.substring(0, 60) + '...' : msg;
+  return msg.length > 88 ? `${msg.substring(0, 88)}...` : msg;
 }
 
 function statusClass(status: string): string {
   const map: Record<string, string> = {
-    active: 'bg-green-500/15 text-green-400',
-    needs_human: 'bg-amber-500/15 text-amber-400',
-    human_controlled: 'bg-blue-500/15 text-blue-400',
-    waiting_for_lead: 'bg-slate-500/15 text-slate-400',
-    completed: 'bg-slate-500/10 text-slate-500',
-    opted_out: 'bg-red-500/15 text-red-400',
-    queued: 'bg-slate-500/15 text-slate-400',
+    active: 'bg-emerald-50 text-emerald-700',
+    needs_human: 'bg-amber-50 text-amber-700',
+    human_controlled: 'bg-sky-50 text-sky-700',
+    waiting_for_lead: 'bg-slate-100 text-slate-600',
+    completed: 'bg-slate-100 text-slate-600',
+    opted_out: 'bg-rose-50 text-rose-700',
+    queued: 'bg-slate-100 text-slate-600',
   };
-  return map[status] ?? 'bg-slate-500/15 text-slate-400';
+  return map[status] ?? 'bg-slate-100 text-slate-600';
 }
 
 function relativeTime(iso: string): string {
   if (!iso) return '';
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
+  if (mins < 1) return 'Just now';
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
@@ -244,7 +351,6 @@ onMounted(async () => {
     const data = await reportingRes.json();
     const wm = data.workspace_metrics;
 
-    // Map workspace metrics to the stats grid keys
     stats.value = {
       total: wm.total_conversations,
       active: wm.active_conversations,
@@ -257,7 +363,9 @@ onMounted(async () => {
     campaigns.value = data.campaigns ?? [];
   }
 
-  if (convRes.ok) conversations.value = await convRes.json();
+  if (convRes.ok) {
+    conversations.value = await convRes.json();
+  }
 
   loading.value = false;
 });

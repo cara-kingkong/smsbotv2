@@ -3,10 +3,13 @@ import type { AuthSession } from '@lib/auth/middleware';
 import { ensureWorkspace } from '@lib/auth/ensure-workspace';
 import { getPublicSupabaseConfig } from '@lib/config/public-server';
 import { getServiceClient } from '@lib/db/client';
+import '../styles/global.css';
 
 interface Props {
   title: string;
 }
+
+const { title } = Astro.props as Props;
 
 // Session is guaranteed by middleware — all non-public routes are authenticated
 const session = (Astro.locals as Record<string, unknown>).session as AuthSession;
@@ -55,107 +58,145 @@ const bottomNav = [
   { href: '/settings', label: 'Settings' },
 ];
 
+const allNav = [...mainNav, ...adminNav, ...bottomNav];
+const currentSection = allNav.find(({ href }) => currentPath === href || currentPath.startsWith(`${href}/`))?.label ?? title;
+const currentGroup = mainNav.some(({ href }) => currentPath === href || currentPath.startsWith(`${href}/`))
+  ? 'Core workspace'
+  : adminNav.some(({ href }) => currentPath === href || currentPath.startsWith(`${href}/`))
+    ? 'Operations'
+    : 'Administration';
 const userInitial = userName.charAt(0).toUpperCase();
 ---
 
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Kong SMS</title>
+    <title>{title} | Kong SMS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
     <script define:vars={{ publicConfig }}>
       window.__KONG_PUBLIC_CONFIG__ = publicConfig;
     </script>
-    <style>
-      @import "../styles/global.css";
-    </style>
   </head>
-  <body class="bg-slate-900 text-slate-100 font-sans min-h-screen">
-    <div class="flex min-h-screen">
-      <!-- Sidebar -->
-      <aside class="w-60 bg-surface border-r border-slate-700 flex flex-col shrink-0">
-        <div class="px-6 py-5 border-b border-slate-700 text-xl font-bold text-blue-500">
-          Kong SMS
-        </div>
-        <nav class="flex-1 py-4 flex flex-col">
-          <!-- Main navigation -->
-          {mainNav.map(link => (
-            <a
-              href={link.href}
-              class:list={[
-                'block px-6 py-2.5 text-sm transition-colors',
-                currentPath.startsWith(link.href)
-                  ? 'text-slate-100 bg-surface-hover font-medium'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-surface-hover',
-              ]}
-            >
-              {link.label}
-            </a>
-          ))}
-
-          <!-- Admin section -->
-          <div class="mt-6 mb-1 px-6">
-            <span class="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Admin</span>
+  <body>
+    <div class="app-shell">
+      <aside class="app-sidebar">
+        <div class="app-brand">
+          <div class="app-window-controls">
+            <span class="app-window-dot app-window-dot-red"></span>
+            <span class="app-window-dot app-window-dot-yellow"></span>
+            <span class="app-window-dot app-window-dot-green"></span>
           </div>
-          {adminNav.map(link => (
-            <a
-              href={link.href}
-              class:list={[
-                'block px-6 py-2.5 text-sm transition-colors',
-                currentPath.startsWith(link.href)
-                  ? 'text-slate-100 bg-surface-hover font-medium'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-surface-hover',
-              ]}
-            >
-              {link.label}
-            </a>
-          ))}
-
-          <!-- Spacer -->
-          <div class="flex-1"></div>
-
-          <!-- Bottom nav -->
-          <div class="border-t border-slate-700 pt-2">
-            {bottomNav.map(link => (
-              <a
-                href={link.href}
-                class:list={[
-                  'block px-6 py-2.5 text-sm transition-colors',
-                  currentPath.startsWith(link.href)
-                    ? 'text-slate-100 bg-surface-hover font-medium'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-surface-hover',
-                ]}
-              >
-                {link.label}
-              </a>
-            ))}
-          </div>
-
-          <!-- User / Workspace context -->
-          <div class="border-t border-slate-700 px-4 py-3">
-            <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 font-semibold text-sm shrink-0">
-                {userInitial}
-              </div>
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex items-start gap-3">
+              <div class="app-brand-mark">KS</div>
               <div class="min-w-0">
-                <div class="text-sm font-medium text-slate-200 truncate">{userName}</div>
-                <div class="text-[11px] text-slate-500 truncate">{workspaceName}</div>
+                <div class="app-brand-eyebrow">Workspace</div>
+                <div class="app-brand-title">Kong SMS</div>
               </div>
             </div>
-            <a
-              href="/auth/logout"
-              class="block mt-2 text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
-            >
+            <div class="app-status-pill">Active</div>
+          </div>
+          <div class="min-w-0">
+            <p class="app-brand-copy">
+              Messaging operations for campaigns, inbox triage, and workspace integrations.
+            </p>
+            <div class="workspace-chip">
+              <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+              {workspaceName}
+            </div>
+          </div>
+        </div>
+
+        <nav class="relative flex h-full flex-col">
+          <div class="nav-group">
+            <div class="nav-label">Core</div>
+            <div class="space-y-1">
+              {mainNav.map(link => (
+                <a
+                  href={link.href}
+                  class:list={[
+                    'nav-link',
+                    currentPath.startsWith(link.href) && 'nav-link-active',
+                  ]}
+                >
+                  <span>{link.label}</span>
+                  <span class="nav-link-dot"></span>
+                </a>
+              ))}
+            </div>
+          </div>
+
+          <div class="nav-group">
+            <div class="nav-label">Operations</div>
+            <div class="space-y-1">
+              {adminNav.map(link => (
+                <a
+                  href={link.href}
+                  class:list={[
+                    'nav-link',
+                    currentPath.startsWith(link.href) && 'nav-link-active',
+                  ]}
+                >
+                  <span>{link.label}</span>
+                  <span class="nav-link-dot"></span>
+                </a>
+              ))}
+            </div>
+          </div>
+
+          <div class="mt-4 border-t border-white/8 pt-4">
+            <div class="space-y-1">
+              {bottomNav.map(link => (
+                <a
+                  href={link.href}
+                  class:list={[
+                    'nav-link',
+                    currentPath.startsWith(link.href) && 'nav-link-active',
+                  ]}
+                >
+                  <span>{link.label}</span>
+                  <span class="nav-link-dot"></span>
+                </a>
+              ))}
+            </div>
+          </div>
+
+          <div class="mt-auto sidebar-user">
+            <div class="flex items-center gap-3">
+              <div class="sidebar-user-avatar">{userInitial}</div>
+              <div class="min-w-0">
+                <div class="sidebar-user-name truncate">{userName}</div>
+                <div class="sidebar-user-meta truncate">{session.email}</div>
+              </div>
+            </div>
+            <a href="/auth/logout" class="mt-4 inline-flex text-xs font-semibold uppercase tracking-[0.2em] text-slate-300 transition hover:text-white">
               Sign out
             </a>
           </div>
         </nav>
       </aside>
 
-      <!-- Main content -->
-      <main class="flex-1 p-8 overflow-y-auto">
-        <slot />
+      <main class="app-main">
+        <div class="page-shell">
+          <div class="app-toolbar">
+            <div>
+              <div class="app-toolbar-label">{currentGroup}</div>
+              <div class="app-toolbar-title">{currentSection}</div>
+            </div>
+            <div class="app-toolbar-meta">
+              <div class="app-toolbar-chip">Live workspace</div>
+              <div class="app-toolbar-chip">{workspaceName}</div>
+            </div>
+          </div>
+          <slot />
+        </div>
       </main>
     </div>
   </body>

@@ -4,9 +4,17 @@ import DashboardView from '@components/DashboardView.vue';
 ---
 
 <BaseLayout title="Dashboard">
-  <div class="mb-6">
-    <h1 class="text-2xl font-semibold">Dashboard</h1>
-    <p class="text-sm text-slate-400 mt-1">Overview of your workspace activity</p>
+  <div class="page-header">
+    <div class="page-header-row">
+      <div>
+        <p class="page-kicker">Workspace Overview</p>
+        <h1 class="page-title">Dashboard</h1>
+        <p class="page-subtitle">
+          Track bookings, spot agent performance trends, and catch conversations that need human attention.
+        </p>
+      </div>
+      <div class="page-badge">Live workspace metrics</div>
+    </div>
   </div>
 
   <DashboardView client:load />

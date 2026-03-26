@@ -339,7 +339,7 @@ const props = defineProps<{
   campaignName: string;
 }>();
 
-const API_BASE = '/.netlify/functions';
+const API_BASE = '/api';
 const supabase = getPublicSupabaseClient();
 
 interface AgentRecord {

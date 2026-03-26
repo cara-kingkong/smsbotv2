@@ -1,139 +1,173 @@
 <template>
-  <div class="flex gap-3" style="height: calc(100vh - 220px); min-height: 400px;">
-    <!-- Left: Conversation list -->
-    <div class="w-[360px] shrink-0 bg-surface border border-slate-700 rounded-lg overflow-hidden flex flex-col">
-      <!-- Filters -->
-      <div class="flex gap-1.5 p-3 border-b border-slate-700 flex-wrap">
-        <button
-          v-for="f in filters"
-          :key="f.value"
-          class="px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
-          :class="currentFilter === f.value ? 'bg-blue-500 text-white' : 'bg-surface-hover text-slate-400 hover:text-slate-200'"
-          @click="setFilter(f.value)"
-        >
-          {{ f.label }}
-        </button>
+  <div
+    class="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]"
+    style="min-height: calc(100vh - 280px);"
+  >
+    <aside class="panel flex min-h-[520px] flex-col overflow-hidden p-0">
+      <div class="border-b border-slate-200/80 px-5 py-5">
+        <div class="page-kicker">Conversation Triage</div>
+        <h2 class="section-title mt-3">Shared inbox</h2>
+        <p class="section-copy mt-2">
+          Scan live conversation state, filter by control mode, and jump into the right thread quickly.
+        </p>
       </div>
 
-      <!-- List -->
-      <div class="flex-1 overflow-y-auto">
-        <div v-if="loading" class="flex items-center justify-center h-full text-slate-400 text-sm">
-          Loading...
+      <div class="border-b border-slate-200/70 px-4 py-4">
+        <div class="pill-tabs">
+          <button
+            v-for="f in filters"
+            :key="f.value"
+            class="pill-tab"
+            :class="currentFilter === f.value ? 'pill-tab-active' : ''"
+            @click="setFilter(f.value)"
+          >
+            {{ f.label }}
+          </button>
         </div>
-        <div v-else-if="conversations.length === 0" class="flex items-center justify-center h-full text-slate-400 text-sm p-6 text-center">
+      </div>
+
+      <div class="flex-1 overflow-y-auto px-3 py-3">
+        <div v-if="loading" class="empty-state min-h-full">Loading conversations...</div>
+        <div v-else-if="conversations.length === 0" class="empty-state min-h-full">
           No conversations found{{ currentFilter ? ' for this filter' : '' }}.
         </div>
-        <div
-          v-for="conv in conversations"
-          :key="conv.id"
-          class="flex flex-col gap-1 px-4 py-3 border-b border-slate-700 cursor-pointer transition-colors hover:bg-surface-hover"
-          :class="{ 'bg-surface-hover border-l-[3px] border-l-blue-500': selectedId === conv.id }"
-          @click="select(conv)"
-        >
-          <div class="flex justify-between items-center">
-            <span class="font-semibold text-sm text-slate-100">{{ leadName(conv) }}</span>
-            <span class="text-[11px] text-slate-400">{{ relativeTime(conv.last_activity_at) }}</span>
-          </div>
-          <div class="text-[13px] text-slate-400 truncate">{{ lastPreview(conv) }}</div>
-          <span class="self-start text-[11px] px-2 py-0.5 rounded-full font-medium mt-0.5" :class="statusClass(conv.status)">
-            {{ conv.status.replace(/_/g, ' ') }}
-          </span>
+        <div v-else class="space-y-2">
+          <button
+            v-for="conv in conversations"
+            :key="conv.id"
+            class="list-card"
+            :class="
+              selectedId === conv.id
+                ? 'list-card-active'
+                : ''
+            "
+            @click="select(conv)"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="text-sm font-semibold text-slate-900">{{ leadName(conv) }}</div>
+                <div class="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                  {{ relativeTime(conv.last_activity_at) }}
+                </div>
+              </div>
+              <span class="badge" :class="statusClass(conv.status)">
+                {{ conv.status.replace(/_/g, ' ') }}
+              </span>
+            </div>
+            <p class="mt-3 text-sm leading-6 text-slate-600">{{ lastPreview(conv) }}</p>
+          </button>
         </div>
       </div>
-    </div>
+    </aside>
 
-    <!-- Right: Detail -->
-    <div class="flex-1 bg-surface border border-slate-700 rounded-lg overflow-hidden flex flex-col">
-      <div v-if="!selected" class="flex items-center justify-center h-full text-slate-400 text-sm">
-        Select a conversation to view messages
+    <section class="panel flex min-h-[520px] flex-col overflow-hidden p-0">
+      <div v-if="!selected" class="empty-state m-5 flex-1">
+        Select a conversation to review messages, take control, or reply manually.
       </div>
 
       <template v-else>
-        <!-- Header -->
-        <div class="flex justify-between items-center px-5 py-3 border-b border-slate-700 shrink-0">
-          <div>
-            <div class="font-semibold text-base">{{ leadName(selected) }}</div>
-            <div class="text-[13px] text-slate-400">{{ selected.lead?.phone_e164 ?? '' }}</div>
-          </div>
-          <div class="flex gap-2">
-            <button
-              v-if="!isTerminal && selected.human_controlled"
-              class="px-3 py-1.5 rounded-md text-[13px] font-medium bg-green-500 text-slate-900 hover:bg-green-400 disabled:opacity-50"
-              :disabled="actionLoading"
-              @click="release"
-            >
-              {{ actionLoading ? 'Releasing...' : 'Release to AI' }}
-            </button>
-            <button
-              v-if="!isTerminal && !selected.human_controlled"
-              class="px-3 py-1.5 rounded-md text-[13px] font-medium bg-amber-500 text-slate-900 hover:bg-amber-400 disabled:opacity-50"
-              :disabled="actionLoading"
-              @click="takeover"
-            >
-              {{ actionLoading ? 'Taking over...' : 'Take Over' }}
-            </button>
-          </div>
-        </div>
+        <div class="border-b border-slate-200/80 px-5 py-5">
+          <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="section-title">{{ leadName(selected) }}</h2>
+                <span class="badge" :class="statusClass(selected.status)">
+                  {{ selected.status.replace(/_/g, ' ') }}
+                </span>
+              </div>
+              <p class="mt-2 text-sm text-slate-500">{{ selected.lead?.phone_e164 ?? '' }}</p>
+            </div>
 
-        <!-- Status banner -->
-        <div
-          class="px-5 py-2 text-[13px] text-center shrink-0"
-          :class="bannerClass"
-        >
-          {{ bannerText }}
-        </div>
-
-        <!-- Messages -->
-        <div ref="threadRef" class="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3">
-          <div v-if="messagesLoading" class="flex items-center justify-center h-full text-slate-400 text-sm">
-            Loading messages...
-          </div>
-          <div v-else-if="messages.length === 0" class="flex items-center justify-center h-full text-slate-400 text-sm">
-            No messages yet
-          </div>
-          <div
-            v-for="msg in messages"
-            :key="msg.id"
-            class="max-w-[75%] px-3.5 py-2.5 rounded-xl text-sm leading-relaxed break-words"
-            :class="messageClass(msg)"
-          >
-            <div>{{ msg.body_text }}</div>
-            <div class="text-[11px] mt-1" :class="metaClass(msg)">
-              {{ senderLabel(msg.sender_type) }} &middot; {{ formatTime(msg.sent_at ?? msg.received_at ?? msg.created_at) }}
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-if="!isTerminal && selected.human_controlled"
+                class="button-secondary"
+                :disabled="actionLoading"
+                @click="release"
+              >
+                {{ actionLoading ? 'Releasing...' : 'Release to AI' }}
+              </button>
+              <button
+                v-if="!isTerminal && !selected.human_controlled"
+                class="button-primary"
+                :disabled="actionLoading"
+                @click="takeover"
+              >
+                {{ actionLoading ? 'Taking over...' : 'Take Over' }}
+              </button>
             </div>
           </div>
         </div>
 
-        <!-- Reply box -->
-        <div v-if="!isTerminal" class="flex gap-2 px-5 py-3 border-t border-slate-700 shrink-0">
-          <textarea
-            ref="replyRef"
-            v-model="replyText"
-            class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 resize-none placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-            placeholder="Type a message..."
-            rows="1"
-            :disabled="sendLoading"
-            @keydown.enter.exact.prevent="send"
-            @input="autoResize"
-          />
-          <button
-            class="self-end px-4 py-2 rounded-lg text-[13px] font-medium bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
-            :disabled="sendLoading || !replyText.trim()"
-            @click="send"
-          >
-            {{ sendLoading ? '...' : 'Send' }}
-          </button>
+        <div class="border-b border-slate-200/70 px-5 py-3">
+          <div class="rounded-[16px] px-4 py-3 text-sm font-medium" :class="bannerClass">
+            {{ bannerText }}
+          </div>
+        </div>
+
+        <div
+          ref="threadRef"
+          class="flex-1 overflow-y-auto px-5 py-5"
+          style="background: linear-gradient(180deg, rgba(255,255,255,0.42), rgba(245,247,244,0.78));"
+        >
+          <div v-if="messagesLoading" class="empty-state min-h-full">Loading messages...</div>
+          <div v-else-if="messages.length === 0" class="empty-state min-h-full">No messages yet.</div>
+          <div v-else class="flex flex-col gap-3">
+            <div
+              v-for="msg in messages"
+              :key="msg.id"
+              class="flex"
+              :class="msg.direction === 'inbound' ? 'justify-start' : 'justify-end'"
+            >
+              <div
+                class="max-w-[86%] rounded-[24px] px-4 py-3 text-sm leading-6 shadow-sm sm:max-w-[72%]"
+                :class="messageClass(msg)"
+              >
+                <div>{{ msg.body_text }}</div>
+                <div class="mt-2 text-[11px] font-semibold uppercase tracking-[0.14em]" :class="metaClass(msg)">
+                  {{ senderLabel(msg.sender_type) }} · {{ formatTime(msg.sent_at ?? msg.received_at ?? msg.created_at) }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="!isTerminal" class="border-t border-slate-200/80 px-5 py-5">
+          <div class="rounded-[18px] border border-slate-200/80 bg-white/92 p-3">
+            <textarea
+              ref="replyRef"
+              v-model="replyText"
+              class="textarea min-h-[72px] border-0 bg-transparent px-2 py-2 shadow-none focus:shadow-none"
+              placeholder="Type an SMS reply and press Enter to send..."
+              rows="1"
+              :disabled="sendLoading"
+              @keydown.enter.exact.prevent="send"
+              @input="autoResize"
+            />
+            <div class="mt-3 flex items-center justify-between gap-3">
+              <p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                Enter sends immediately
+              </p>
+              <button
+                class="button-primary"
+                :disabled="sendLoading || !replyText.trim()"
+                @click="send"
+              >
+                {{ sendLoading ? 'Sending...' : 'Send reply' }}
+              </button>
+            </div>
+          </div>
         </div>
       </template>
-    </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { getSessionContext } from '@lib/config/public-client';
 
-const API_BASE = '/.netlify/functions';
+const API_BASE = '/api';
 
 interface Lead {
   id: string;
@@ -192,16 +226,16 @@ const isTerminal = computed(() =>
 
 const bannerClass = computed(() => {
   if (!selected.value) return '';
-  if (isTerminal.value) return 'bg-slate-800/50 text-slate-400';
-  if (selected.value.human_controlled) return 'bg-blue-500/10 text-blue-400';
-  return 'bg-green-500/10 text-green-400';
+  if (isTerminal.value) return 'bg-slate-100 text-slate-600';
+  if (selected.value.human_controlled) return 'bg-sky-50 text-sky-700';
+  return 'bg-emerald-50 text-emerald-700';
 });
 
 const bannerText = computed(() => {
   if (!selected.value) return '';
   if (isTerminal.value) return `Conversation ${selected.value.status.replace(/_/g, ' ')}`;
-  if (selected.value.human_controlled) return 'You are controlling this conversation';
-  return 'AI is managing this conversation';
+  if (selected.value.human_controlled) return 'You are currently controlling this conversation manually.';
+  return 'AI is currently managing this conversation.';
 });
 
 function leadName(conv: Conv): string {
@@ -212,32 +246,37 @@ function leadName(conv: Conv): string {
 }
 
 function lastPreview(conv: Conv): string {
-  return conv.last_message?.[0]?.body_text ?? 'No messages yet';
+  const text = conv.last_message?.[0]?.body_text ?? 'No messages yet';
+  return text.length > 96 ? `${text.slice(0, 96)}...` : text;
 }
 
 function statusClass(status: string): string {
   const map: Record<string, string> = {
-    active: 'bg-green-500/15 text-green-400',
-    needs_human: 'bg-amber-500/15 text-amber-400',
-    human_controlled: 'bg-blue-500/15 text-blue-400',
-    waiting_for_lead: 'bg-slate-500/15 text-slate-400',
-    completed: 'bg-slate-500/10 text-slate-500',
-    opted_out: 'bg-red-500/15 text-red-400',
-    queued: 'bg-slate-500/15 text-slate-400',
+    active: 'bg-emerald-50 text-emerald-700',
+    needs_human: 'bg-amber-50 text-amber-700',
+    human_controlled: 'bg-sky-50 text-sky-700',
+    waiting_for_lead: 'bg-slate-100 text-slate-600',
+    completed: 'bg-slate-100 text-slate-600',
+    opted_out: 'bg-rose-50 text-rose-700',
+    queued: 'bg-slate-100 text-slate-600',
   };
-  return map[status] ?? 'bg-slate-500/15 text-slate-400';
+  return map[status] ?? 'bg-slate-100 text-slate-600';
 }
 
 function messageClass(msg: Msg): string {
-  if (msg.direction === 'inbound') return 'self-start bg-surface-hover rounded-bl-sm';
-  if (msg.sender_type === 'human') return 'self-end bg-green-500 text-slate-900 rounded-br-sm';
-  return 'self-end bg-blue-500 text-white rounded-br-sm';
+  if (msg.direction === 'inbound') {
+    return 'border border-slate-200/80 bg-white text-slate-800';
+  }
+  if (msg.sender_type === 'human') {
+    return 'bg-amber-50 text-amber-950';
+  }
+  return 'bg-teal-600 text-white';
 }
 
 function metaClass(msg: Msg): string {
-  if (msg.direction === 'inbound') return 'text-slate-500';
-  if (msg.sender_type === 'human') return 'text-green-900/60';
-  return 'text-white/60';
+  if (msg.direction === 'inbound') return 'text-slate-400';
+  if (msg.sender_type === 'human') return 'text-amber-700';
+  return 'text-teal-100';
 }
 
 function senderLabel(type: string): string {
@@ -248,11 +287,11 @@ function relativeTime(iso: string): string {
   if (!iso) return '';
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'now';
-  if (mins < 60) return `${mins}m`;
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  return `${Math.floor(hrs / 24)}d`;
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 function formatTime(iso: string): string {
@@ -264,7 +303,7 @@ function autoResize() {
   const el = replyRef.value;
   if (!el) return;
   el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+  el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
 }
 
 function resolveWorkspace(): string | null {
@@ -318,7 +357,7 @@ async function takeover() {
   });
   if (res.ok) {
     await fetchConversations();
-    const updated = conversations.value.find(c => c.id === selectedId.value);
+    const updated = conversations.value.find((c) => c.id === selectedId.value);
     if (updated) selected.value = updated;
   }
   actionLoading.value = false;
@@ -334,7 +373,7 @@ async function release() {
   });
   if (res.ok) {
     await fetchConversations();
-    const updated = conversations.value.find(c => c.id === selectedId.value);
+    const updated = conversations.value.find((c) => c.id === selectedId.value);
     if (updated) selected.value = updated;
   }
   actionLoading.value = false;
@@ -351,7 +390,7 @@ async function send() {
   if (res.ok) {
     replyText.value = '';
     await Promise.all([fetchConversations(), fetchMessages(selected.value.id)]);
-    const updated = conversations.value.find(c => c.id === selectedId.value);
+    const updated = conversations.value.find((c) => c.id === selectedId.value);
     if (updated) selected.value = updated;
     scrollToBottom();
   }
@@ -368,12 +407,11 @@ onMounted(async () => {
   await fetchConversations();
   loading.value = false;
 
-  // Poll every 15s
   pollTimer = setInterval(async () => {
     await fetchConversations();
     if (selectedId.value) {
       await fetchMessages(selectedId.value);
-      const updated = conversations.value.find(c => c.id === selectedId.value);
+      const updated = conversations.value.find((c) => c.id === selectedId.value);
       if (updated) selected.value = updated;
     }
   }, 15000);

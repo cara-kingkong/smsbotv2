@@ -1,426 +1,387 @@
 <template>
-  <div class="flex gap-4" style="height: calc(100vh - 220px); min-height: 400px;">
-    <!-- Left: Campaign list -->
-    <div class="w-[400px] shrink-0 bg-surface border border-slate-700 rounded-lg overflow-hidden flex flex-col">
-      <!-- Search -->
-      <div class="p-3 border-b border-slate-700">
+  <div
+    class="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]"
+    style="min-height: calc(100vh - 280px);"
+  >
+    <aside class="panel flex min-h-[560px] flex-col overflow-hidden p-0">
+      <div class="border-b border-slate-200/80 px-5 py-5">
+        <div class="page-kicker">Campaign Library</div>
+        <h2 class="section-title mt-3">Browse campaigns</h2>
+        <p class="section-copy mt-2">
+          Search by name, review status quickly, and move into detailed editing without losing the list view.
+        </p>
+      </div>
+
+      <div class="border-b border-slate-200/70 px-4 py-4">
         <input
           v-model="searchQuery"
           type="text"
           placeholder="Search campaigns..."
-          class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+          class="input"
           @input="debouncedSearch"
         />
       </div>
 
-      <!-- List -->
-      <div class="flex-1 overflow-y-auto">
-        <div v-if="listLoading" class="flex items-center justify-center h-full text-slate-400 text-sm">
-          Loading...
+      <div class="flex-1 overflow-y-auto px-3 py-3">
+        <div v-if="listLoading" class="empty-state min-h-full">Loading campaigns...</div>
+        <div v-else-if="filteredCampaigns.length === 0" class="empty-state min-h-full">
+          No campaigns found. Create your first campaign from the panel on the right.
         </div>
-        <div v-else-if="filteredCampaigns.length === 0" class="flex items-center justify-center h-full text-slate-400 text-sm p-6 text-center">
-          No campaigns found. Create your first campaign using the form.
-        </div>
-        <div
-          v-for="campaign in filteredCampaigns"
-          :key="campaign.id"
-          class="flex flex-col gap-0.5 px-4 py-3 border-b border-slate-700 cursor-pointer transition-colors hover:bg-surface-hover"
-          :class="{ 'bg-surface-hover border-l-[3px] border-l-blue-500': selectedCampaign?.id === campaign.id }"
-          @click="selectCampaign(campaign)"
-        >
-          <div class="flex justify-between items-center">
-            <span class="font-semibold text-sm text-slate-100">{{ campaign.name }}</span>
-            <span
-              class="text-[11px] px-2 py-0.5 rounded-full font-medium"
-              :class="statusClass(campaign.status)"
-            >{{ campaign.status }}</span>
-          </div>
-          <div class="flex justify-between items-center mt-1">
-            <span class="text-[13px] text-slate-400">{{ campaign.agent_count ?? 0 }} agent{{ (campaign.agent_count ?? 0) === 1 ? '' : 's' }}</span>
-            <span class="text-[11px] text-slate-400">{{ relativeTime(campaign.created_at) }}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Right: Create/Detail panel -->
-    <div class="flex-1 bg-surface border border-slate-700 rounded-lg overflow-hidden flex flex-col">
-      <!-- Tab bar -->
-      <div class="flex border-b border-slate-700 shrink-0">
-        <button
-          class="flex-1 px-4 py-3 text-sm font-medium transition-colors"
-          :class="activeTab === 'create' ? 'text-blue-400 border-b-2 border-blue-500 bg-surface-hover' : 'text-slate-400 hover:text-slate-200'"
-          @click="activeTab = 'create'"
-        >
-          Create Campaign
-        </button>
-        <button
-          class="flex-1 px-4 py-3 text-sm font-medium transition-colors"
-          :class="activeTab === 'detail' ? 'text-blue-400 border-b-2 border-blue-500 bg-surface-hover' : 'text-slate-400 hover:text-slate-200'"
-          :disabled="!selectedCampaign"
-          @click="activeTab = 'detail'"
-        >
-          Campaign Detail
-        </button>
-      </div>
-
-      <!-- Create Campaign Form -->
-      <div v-if="activeTab === 'create'" class="flex-1 overflow-y-auto p-6">
-        <form @submit.prevent="createCampaign" class="max-w-md space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Campaign Name *</label>
-            <input
-              v-model="form.name"
-              type="text"
-              required
-              placeholder="e.g. Spring Lead Gen"
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-            />
-          </div>
-
-          <!-- Business Hours -->
-          <fieldset class="border border-slate-700 rounded-lg p-4 space-y-3">
-            <legend class="text-sm font-medium text-slate-300 px-1">Business Hours</legend>
-
-            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                v-model="form.useCustomHours"
-                class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
-              />
-              Override workspace defaults
-            </label>
-
-            <div v-if="!form.useCustomHours" class="text-xs text-slate-400 bg-slate-800/50 rounded px-3 py-2">
-              Using workspace default business hours. You can change them in <a href="/settings" class="text-blue-400 hover:text-blue-300">Settings</a>.
-            </div>
-
-            <template v-if="form.useCustomHours">
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">Timezone</label>
-                <select
-                  v-model="form.timezone"
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-                >
-                  <option v-for="tz in timezoneOptions" :key="tz.value" :value="tz.value">{{ tz.label }}</option>
-                </select>
-              </div>
-
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">Active Days</label>
-                <div class="flex flex-wrap gap-2">
-                  <label
-                    v-for="(dayLabel, dayIndex) in dayLabels"
-                    :key="dayIndex"
-                    class="flex items-center gap-1.5 text-sm text-slate-300 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      :value="dayIndex"
-                      v-model="form.activeDays"
-                      class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
-                    />
-                    {{ dayLabel }}
-                  </label>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="block text-sm font-medium text-slate-300 mb-1">Start Time</label>
-                  <select
-                    v-model="form.startTime"
-                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-                  >
-                    <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-slate-300 mb-1">End Time</label>
-                  <select
-                    v-model="form.endTime"
-                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-                  >
-                    <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
-                  </select>
-                </div>
-              </div>
-            </template>
-          </fieldset>
-
-          <!-- Stop Conditions -->
-          <fieldset class="border border-slate-700 rounded-lg p-4 space-y-3">
-            <legend class="text-sm font-medium text-slate-300 px-1">Stop Conditions</legend>
-
-            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                v-model="form.useCustomStopConditions"
-                class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
-              />
-              Override workspace defaults
-            </label>
-
-            <div v-if="!form.useCustomStopConditions" class="text-xs text-slate-400 bg-slate-800/50 rounded px-3 py-2">
-              Using workspace default stop conditions. You can change them in <a href="/settings" class="text-blue-400 hover:text-blue-300">Settings</a>.
-            </div>
-
-            <template v-if="form.useCustomStopConditions">
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">Max Messages</label>
-                <input
-                  v-model.number="form.maxMessages"
-                  type="number"
-                  min="1"
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">Max Days</label>
-                <input
-                  v-model.number="form.maxDays"
-                  type="number"
-                  min="1"
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">Max No-Reply Hours</label>
-                <input
-                  v-model.number="form.maxNoReplyHours"
-                  type="number"
-                  min="1"
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-            </template>
-          </fieldset>
-
-          <!-- Success/Error messages -->
-          <div v-if="formSuccess" class="bg-green-500/10 border border-green-500/30 text-green-400 text-sm px-4 py-3 rounded-lg">
-            {{ formSuccess }}
-          </div>
-          <div v-if="formError" class="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
-            {{ formError }}
-          </div>
-
+        <div v-else class="space-y-2">
           <button
-            type="submit"
-            :disabled="formLoading"
-            class="w-full py-2.5 rounded-lg text-sm font-medium bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 transition-colors"
+            v-for="campaign in filteredCampaigns"
+            :key="campaign.id"
+            class="list-card"
+            :class="
+              selectedCampaign?.id === campaign.id
+                ? 'list-card-active'
+                : ''
+            "
+            @click="selectCampaign(campaign)"
           >
-            {{ formLoading ? 'Creating...' : 'Create Campaign' }}
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="text-sm font-semibold text-slate-900">{{ campaign.name }}</div>
+                <div class="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                  Created {{ relativeTime(campaign.created_at) }}
+                </div>
+              </div>
+              <span class="badge" :class="statusClass(campaign.status)">{{ campaign.status }}</span>
+            </div>
+            <div class="mt-3 text-sm text-slate-600">
+              {{ campaign.agent_count ?? 0 }} agent{{ (campaign.agent_count ?? 0) === 1 ? '' : 's' }} assigned
+            </div>
           </button>
-        </form>
+        </div>
       </div>
+    </aside>
 
-      <!-- Campaign Detail -->
-      <div v-else-if="activeTab === 'detail'" class="flex-1 overflow-y-auto p-6">
-        <div v-if="!selectedCampaign" class="flex items-center justify-center h-full text-slate-400 text-sm">
-          Select a campaign from the list to view details
-        </div>
-        <div v-else-if="detailLoading" class="flex items-center justify-center h-full text-slate-400 text-sm">
-          Loading campaign details...
-        </div>
-        <div v-else class="max-w-md space-y-4">
-          <div class="flex items-center gap-3 mb-6">
-            <div class="w-12 h-12 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-lg">
-              {{ selectedCampaign.name.charAt(0).toUpperCase() }}
-            </div>
-            <div>
-              <div class="text-lg font-semibold">{{ selectedCampaign.name }}</div>
-              <div class="text-sm text-slate-400">Created {{ formatDate(selectedCampaign.created_at) }}</div>
-            </div>
-          </div>
-
-          <!-- Editable fields -->
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Campaign Name</label>
-            <input
-              v-model="detail.name"
-              type="text"
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-            />
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Status</label>
-            <select
-              v-model="detail.status"
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-            >
-              <option value="active">Active</option>
-              <option value="paused">Paused</option>
-              <option value="archived">Archived</option>
-            </select>
-          </div>
-
-          <!-- Business Hours Edit -->
-          <fieldset class="border border-slate-700 rounded-lg p-4 space-y-3">
-            <legend class="text-sm font-medium text-slate-300 px-1">Business Hours</legend>
-
-            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                v-model="detail.useCustomHours"
-                class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
-              />
-              Override workspace defaults
-            </label>
-
-            <div v-if="!detail.useCustomHours" class="text-xs text-slate-400 bg-slate-800/50 rounded px-3 py-2">
-              Using workspace default business hours. You can change them in <a href="/settings" class="text-blue-400 hover:text-blue-300">Settings</a>.
-            </div>
-
-            <template v-if="detail.useCustomHours">
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">Timezone</label>
-                <select
-                  v-model="detail.timezone"
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-                >
-                  <option v-for="tz in timezoneOptions" :key="tz.value" :value="tz.value">{{ tz.label }}</option>
-                </select>
-              </div>
-
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">Active Days</label>
-                <div class="flex flex-wrap gap-2">
-                  <label
-                    v-for="(dayLabel, dayIndex) in dayLabels"
-                    :key="dayIndex"
-                    class="flex items-center gap-1.5 text-sm text-slate-300 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      :value="dayIndex"
-                      v-model="detail.activeDays"
-                      class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
-                    />
-                    {{ dayLabel }}
-                  </label>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="block text-sm font-medium text-slate-300 mb-1">Start Time</label>
-                  <select
-                    v-model="detail.startTime"
-                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-                  >
-                    <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-slate-300 mb-1">End Time</label>
-                  <select
-                    v-model="detail.endTime"
-                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-                  >
-                    <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
-                  </select>
-                </div>
-              </div>
-            </template>
-          </fieldset>
-
-          <!-- Stop Conditions Edit -->
-          <fieldset class="border border-slate-700 rounded-lg p-4 space-y-3">
-            <legend class="text-sm font-medium text-slate-300 px-1">Stop Conditions</legend>
-
-            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                v-model="detail.useCustomStopConditions"
-                class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
-              />
-              Override workspace defaults
-            </label>
-
-            <div v-if="!detail.useCustomStopConditions" class="text-xs text-slate-400 bg-slate-800/50 rounded px-3 py-2">
-              Using workspace default stop conditions. You can change them in <a href="/settings" class="text-blue-400 hover:text-blue-300">Settings</a>.
-            </div>
-
-            <template v-if="detail.useCustomStopConditions">
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">Max Messages</label>
-                <input
-                  v-model.number="detail.maxMessages"
-                  type="number"
-                  min="1"
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">Max Days</label>
-                <input
-                  v-model.number="detail.maxDays"
-                  type="number"
-                  min="1"
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">Max No-Reply Hours</label>
-                <input
-                  v-model.number="detail.maxNoReplyHours"
-                  type="number"
-                  min="1"
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-            </template>
-          </fieldset>
-
-          <!-- Save Success/Error -->
-          <div v-if="detailSuccess" class="bg-green-500/10 border border-green-500/30 text-green-400 text-sm px-4 py-3 rounded-lg">
-            {{ detailSuccess }}
-          </div>
-          <div v-if="detailError" class="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
-            {{ detailError }}
-          </div>
-
+    <section class="panel min-h-[560px] overflow-hidden p-0">
+      <div class="border-b border-slate-200/80 px-5 py-4">
+        <div class="flex flex-wrap gap-2">
           <button
-            type="button"
-            :disabled="detailSaving"
-            class="w-full py-2.5 rounded-lg text-sm font-medium bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 transition-colors"
-            @click="saveCampaign"
+            class="pill-tab"
+            :class="activeTab === 'create' ? 'pill-tab-active' : ''"
+            @click="activeTab = 'create'"
           >
-            {{ detailSaving ? 'Saving...' : 'Save Changes' }}
+            Create campaign
           </button>
+          <button
+            class="pill-tab"
+            :class="activeTab === 'detail' ? 'pill-tab-active' : ''"
+            :disabled="!selectedCampaign"
+            @click="activeTab = 'detail'"
+          >
+            Campaign detail
+          </button>
+        </div>
+      </div>
 
-          <!-- Agents section -->
-          <div class="border border-slate-700 rounded-lg p-4 mt-4 space-y-3">
-            <div class="flex justify-between items-center">
-              <span class="text-sm font-medium text-slate-300">Agents ({{ campaignAgents.length }})</span>
-              <a
-                :href="`/campaigns?campaign_id=${selectedCampaign.id}&tab=agents`"
-                class="text-sm text-blue-400 hover:text-blue-300 transition-colors"
-              >Manage Agents &rarr;</a>
+      <div v-if="activeTab === 'create'" class="px-5 py-5 sm:px-6 sm:py-6">
+        <div class="mx-auto max-w-4xl space-y-6">
+          <div>
+            <div class="page-kicker">New Campaign</div>
+            <h2 class="section-title mt-3">Launch a campaign with clean defaults.</h2>
+            <p class="section-copy mt-2">
+              Start with a strong name, optionally override business hours, and control stop conditions only where needed.
+            </p>
+          </div>
+
+          <form class="space-y-6" @submit.prevent="createCampaign">
+            <div class="panel-muted">
+              <label class="form-label">Campaign Name *</label>
+              <input
+                v-model="form.name"
+                type="text"
+                required
+                placeholder="e.g. Spring Lead Gen"
+                class="input"
+              />
+              <p class="form-help">Choose a name that is easy to identify in analytics and conversation routing.</p>
             </div>
-            <div v-if="campaignAgents.length === 0" class="text-sm text-slate-500">
-              No agents assigned to this campaign yet.
+
+            <fieldset class="panel-muted space-y-4">
+              <legend class="form-label">Business Hours</legend>
+
+              <label class="flex items-center gap-3 text-sm text-slate-700">
+                <input
+                  v-model="form.useCustomHours"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                />
+                Override workspace defaults
+              </label>
+
+              <div v-if="!form.useCustomHours" class="note-box">
+                Using workspace default business hours. Update them in <a href="/settings" class="font-semibold text-teal-700">Settings</a> if you want a shared change.
+              </div>
+
+              <template v-if="form.useCustomHours">
+                <div>
+                  <label class="form-label">Timezone</label>
+                  <select v-model="form.timezone" class="select">
+                    <option v-for="tz in timezoneOptions" :key="tz.value" :value="tz.value">{{ tz.label }}</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label class="form-label">Active Days</label>
+                  <div class="flex flex-wrap gap-3">
+                    <label
+                      v-for="(dayLabel, dayIndex) in dayLabels"
+                      :key="dayIndex"
+                      class="flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-2 text-sm text-slate-700"
+                    >
+                      <input
+                        v-model="form.activeDays"
+                        type="checkbox"
+                        :value="dayIndex"
+                        class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                      />
+                      {{ dayLabel }}
+                    </label>
+                  </div>
+                </div>
+
+                <div class="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label class="form-label">Start Time</label>
+                    <select v-model="form.startTime" class="select">
+                      <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="form-label">End Time</label>
+                    <select v-model="form.endTime" class="select">
+                      <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
+                    </select>
+                  </div>
+                </div>
+              </template>
+            </fieldset>
+
+            <fieldset class="panel-muted space-y-4">
+              <legend class="form-label">Stop Conditions</legend>
+
+              <label class="flex items-center gap-3 text-sm text-slate-700">
+                <input
+                  v-model="form.useCustomStopConditions"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                />
+                Override workspace defaults
+              </label>
+
+              <div v-if="!form.useCustomStopConditions" class="note-box">
+                Using workspace default stop conditions. Update them in <a href="/settings" class="font-semibold text-teal-700">Settings</a> if you want a shared change.
+              </div>
+
+              <template v-if="form.useCustomStopConditions">
+                <div class="grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <label class="form-label">Max Messages</label>
+                    <input v-model.number="form.maxMessages" type="number" min="1" class="input" />
+                  </div>
+                  <div>
+                    <label class="form-label">Max Days</label>
+                    <input v-model.number="form.maxDays" type="number" min="1" class="input" />
+                  </div>
+                  <div>
+                    <label class="form-label">Max No-Reply Hours</label>
+                    <input v-model.number="form.maxNoReplyHours" type="number" min="1" class="input" />
+                  </div>
+                </div>
+              </template>
+            </fieldset>
+
+            <div v-if="formSuccess" class="feedback-success">{{ formSuccess }}</div>
+            <div v-if="formError" class="feedback-error">{{ formError }}</div>
+
+            <button type="submit" :disabled="formLoading" class="button-primary w-full sm:w-auto">
+              {{ formLoading ? 'Creating...' : 'Create Campaign' }}
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <div v-else class="px-5 py-5 sm:px-6 sm:py-6">
+        <div v-if="!selectedCampaign" class="empty-state min-h-[420px]">
+          Select a campaign from the list to review details and adjust configuration.
+        </div>
+        <div v-else-if="detailLoading" class="empty-state min-h-[420px]">Loading campaign details...</div>
+        <div v-else class="mx-auto max-w-4xl space-y-6">
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex items-center gap-4">
+              <div class="flex h-14 w-14 items-center justify-center rounded-[20px] bg-teal-100 text-lg font-bold text-teal-700">
+                {{ selectedCampaign.name.charAt(0).toUpperCase() }}
+              </div>
+              <div>
+                <div class="page-kicker">Campaign Detail</div>
+                <h2 class="section-title mt-2">{{ selectedCampaign.name }}</h2>
+                <p class="section-copy mt-1">Created {{ formatDate(selectedCampaign.created_at) }}</p>
+              </div>
             </div>
-            <div
-              v-for="agent in campaignAgents"
-              :key="agent.id"
-              class="flex justify-between items-center py-2 border-b border-slate-700 last:border-0"
-            >
-              <span class="text-sm text-slate-200">{{ agent.name }}</span>
-              <span class="text-[12px] px-2 py-0.5 rounded-full font-medium bg-blue-500/15 text-blue-400">
-                weight: {{ agent.weight ?? 1 }}
-              </span>
+            <span class="badge self-start sm:self-auto" :class="statusClass(detail.status)">{{ detail.status }}</span>
+          </div>
+
+          <div class="grid gap-6">
+            <div class="panel-muted space-y-4">
+              <div class="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label class="form-label">Campaign Name</label>
+                  <input v-model="detail.name" type="text" class="input" />
+                </div>
+                <div>
+                  <label class="form-label">Status</label>
+                  <select v-model="detail.status" class="select">
+                    <option value="active">Active</option>
+                    <option value="paused">Paused</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </div>
+              </div>
             </div>
+
+            <fieldset class="panel-muted space-y-4">
+              <legend class="form-label">Business Hours</legend>
+
+              <label class="flex items-center gap-3 text-sm text-slate-700">
+                <input
+                  v-model="detail.useCustomHours"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                />
+                Override workspace defaults
+              </label>
+
+              <div v-if="!detail.useCustomHours" class="note-box">
+                Using workspace default business hours. Update them in <a href="/settings" class="font-semibold text-teal-700">Settings</a> if you want a shared change.
+              </div>
+
+              <template v-if="detail.useCustomHours">
+                <div>
+                  <label class="form-label">Timezone</label>
+                  <select v-model="detail.timezone" class="select">
+                    <option v-for="tz in timezoneOptions" :key="tz.value" :value="tz.value">{{ tz.label }}</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label class="form-label">Active Days</label>
+                  <div class="flex flex-wrap gap-3">
+                    <label
+                      v-for="(dayLabel, dayIndex) in dayLabels"
+                      :key="dayIndex"
+                      class="flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-2 text-sm text-slate-700"
+                    >
+                      <input
+                        v-model="detail.activeDays"
+                        type="checkbox"
+                        :value="dayIndex"
+                        class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                      />
+                      {{ dayLabel }}
+                    </label>
+                  </div>
+                </div>
+
+                <div class="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label class="form-label">Start Time</label>
+                    <select v-model="detail.startTime" class="select">
+                      <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="form-label">End Time</label>
+                    <select v-model="detail.endTime" class="select">
+                      <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
+                    </select>
+                  </div>
+                </div>
+              </template>
+            </fieldset>
+
+            <fieldset class="panel-muted space-y-4">
+              <legend class="form-label">Stop Conditions</legend>
+
+              <label class="flex items-center gap-3 text-sm text-slate-700">
+                <input
+                  v-model="detail.useCustomStopConditions"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                />
+                Override workspace defaults
+              </label>
+
+              <div v-if="!detail.useCustomStopConditions" class="note-box">
+                Using workspace default stop conditions. Update them in <a href="/settings" class="font-semibold text-teal-700">Settings</a> if you want a shared change.
+              </div>
+
+              <template v-if="detail.useCustomStopConditions">
+                <div class="grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <label class="form-label">Max Messages</label>
+                    <input v-model.number="detail.maxMessages" type="number" min="1" class="input" />
+                  </div>
+                  <div>
+                    <label class="form-label">Max Days</label>
+                    <input v-model.number="detail.maxDays" type="number" min="1" class="input" />
+                  </div>
+                  <div>
+                    <label class="form-label">Max No-Reply Hours</label>
+                    <input v-model.number="detail.maxNoReplyHours" type="number" min="1" class="input" />
+                  </div>
+                </div>
+              </template>
+            </fieldset>
+
+            <div class="panel-muted">
+              <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 class="text-base font-semibold text-slate-900">Assigned Agents</h3>
+                  <p class="mt-1 text-sm text-slate-600">
+                    {{ campaignAgents.length }} agent{{ campaignAgents.length === 1 ? '' : 's' }} currently assigned to this campaign.
+                  </p>
+                </div>
+                <a
+                  :href="`/campaigns?campaign_id=${selectedCampaign.id}&tab=agents`"
+                  class="button-secondary"
+                >
+                  Manage Agents
+                </a>
+              </div>
+
+              <div v-if="campaignAgents.length === 0" class="note-box mt-4">
+                No agents assigned to this campaign yet.
+              </div>
+              <div v-else class="mt-4 space-y-2">
+                <div
+                  v-for="agent in campaignAgents"
+                  :key="agent.id"
+                  class="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white/80 px-4 py-3"
+                >
+                  <span class="text-sm font-semibold text-slate-900">{{ agent.name }}</span>
+                  <span class="badge bg-teal-50 text-teal-700">weight {{ agent.weight ?? 1 }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="detailSuccess" class="feedback-success">{{ detailSuccess }}</div>
+            <div v-if="detailError" class="feedback-error">{{ detailError }}</div>
+
+            <button type="button" :disabled="detailSaving" class="button-primary w-full sm:w-auto" @click="saveCampaign">
+              {{ detailSaving ? 'Saving...' : 'Save Changes' }}
+            </button>
           </div>
         </div>
       </div>
-    </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { getSessionContext } from '@lib/config/public-client';
 import { timezoneOptions } from '@lib/utils/timezones';
 
@@ -462,7 +423,6 @@ const searchQuery = ref('');
 const selectedCampaign = ref<CampaignRecord | null>(null);
 const activeTab = ref<'create' | 'detail'>('create');
 
-// Create form state
 const form = ref({
   name: '',
   useCustomHours: false,
@@ -479,7 +439,6 @@ const formLoading = ref(false);
 const formError = ref('');
 const formSuccess = ref('');
 
-// Detail/edit state
 const detail = ref({
   name: '',
   status: 'active',
@@ -511,13 +470,13 @@ const filteredCampaigns = computed(() => {
 function statusClass(status: string): string {
   switch (status) {
     case 'active':
-      return 'bg-green-500/15 text-green-400';
+      return 'bg-emerald-50 text-emerald-700';
     case 'paused':
-      return 'bg-yellow-500/15 text-yellow-400';
+      return 'bg-amber-50 text-amber-700';
     case 'archived':
-      return 'bg-slate-500/15 text-slate-400';
+      return 'bg-slate-100 text-slate-600';
     default:
-      return 'bg-slate-500/15 text-slate-400';
+      return 'bg-slate-100 text-slate-600';
   }
 }
 
@@ -713,7 +672,7 @@ function relativeTime(iso: string): string {
   if (!iso) return '';
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'now';
+  if (mins < 1) return 'just now';
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
@@ -722,7 +681,13 @@ function relativeTime(iso: string): string {
 
 function formatDate(iso: string): string {
   if (!iso) return '';
-  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 onMounted(async () => {

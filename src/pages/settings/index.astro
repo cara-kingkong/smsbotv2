@@ -5,19 +5,27 @@ import IntegrationManager from '@components/IntegrationManager.vue';
 ---
 
 <BaseLayout title="Settings">
-  <div class="mb-6">
-    <h1 class="text-2xl font-semibold">Settings</h1>
-    <p class="text-sm text-slate-400 mt-1">Workspace configuration and integrations</p>
+  <div class="page-header">
+    <div class="page-header-row">
+      <div>
+        <p class="page-kicker">Workspace Setup</p>
+        <h1 class="page-title">Settings</h1>
+        <p class="page-subtitle">
+          Keep defaults, provider credentials, and operating rules organised in one place with clearer separation between configuration areas.
+        </p>
+      </div>
+      <div class="page-badge">Secure workspace configuration</div>
+    </div>
   </div>
 
   <div class="space-y-8">
     <section>
-      <h2 class="text-lg font-semibold mb-4">Workspace Defaults</h2>
+      <h2 class="section-title mb-4">Workspace Defaults</h2>
       <WorkspaceSettings client:load />
     </section>
 
     <section>
-      <h2 class="text-lg font-semibold mb-4">Integrations</h2>
+      <h2 class="section-title mb-4">Integrations</h2>
       <IntegrationManager client:load />
     </section>
   </div>

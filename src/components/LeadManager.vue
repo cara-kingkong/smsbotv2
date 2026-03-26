@@ -231,7 +231,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { getPublicSupabaseClient, getSessionContext } from '@lib/config/public-client';
 
-const API_BASE = '/.netlify/functions';
+const API_BASE = '/api';
 const supabase = getPublicSupabaseClient();
 
 interface LeadRecord {

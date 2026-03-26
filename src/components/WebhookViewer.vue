@@ -74,7 +74,7 @@
 import { ref, onMounted } from 'vue';
 import { getSessionContext } from '@lib/config/public-client';
 
-const API_BASE = '/.netlify/functions';
+const API_BASE = '/api';
 
 interface WebhookReceiptRecord {
   id: string;
