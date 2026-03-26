@@ -228,6 +228,8 @@ Represents a business or business unit.
 - `slug` text not null unique
 - `status` workspace_status not null default `active`
 - `settings_json` jsonb not null default '{}'::jsonb
+- `business_hours_json` jsonb not null default '{}'::jsonb
+- `stop_conditions_json` jsonb not null default '{"max_messages": 50, "max_days": 14, "max_no_reply_hours": 72}'::jsonb
 - `created_at` timestamptz not null default now()
 - `updated_at` timestamptz not null default now()
 - `deleted_at` timestamptz null
@@ -235,6 +237,8 @@ Represents a business or business unit.
 ## Notes
 - `slug` should be unique globally.
 - `settings_json` can hold workspace-wide defaults that are not important enough for dedicated columns yet.
+- `business_hours_json` holds the workspace default business hours. Campaigns inherit these unless they define their own (non-empty) `business_hours_json`. See section 6.1 for the JSON structure.
+- `stop_conditions_json` holds the workspace default stop conditions. Campaigns inherit these unless they define their own (non-empty) `stop_conditions_json`.
 
 ## Suggested Indexes
 - unique index on `slug`

@@ -6,6 +6,7 @@ import { AIService } from '../../src/lib/ai/service';
 import { AgentService } from '../../src/lib/agents/service';
 import { LeadService } from '../../src/lib/leads/service';
 import { CampaignService } from '../../src/lib/campaigns/service';
+import { WorkspaceService } from '../../src/lib/workspaces/service';
 import { BookingService } from '../../src/lib/calendar/service';
 import { QueueService } from '../../src/lib/queues/service';
 import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
@@ -80,8 +81,21 @@ export default async (req: Request, _context: Context) => {
     const campaign = await campaignService.getById(conversation.campaign_id);
     if (!campaign) throw new Error(`Campaign not found: ${conversation.campaign_id}`);
 
+    // ── Resolve workspace defaults for inheritance ─────────────
+    const workspaceService = new WorkspaceService(db);
+    const workspace = await workspaceService.getById(campaign.workspace_id);
+
+    // ── Resolve stop conditions (campaign override > workspace default) ──
+    const hasCampaignStopConditions = campaign.stop_conditions_json?.max_messages !== undefined
+      && Object.keys(campaign.stop_conditions_json).length > 0;
+    const effectiveStopConditions = hasCampaignStopConditions
+      ? campaign.stop_conditions_json
+      : (workspace?.stop_conditions_json && 'max_messages' in workspace.stop_conditions_json)
+        ? workspace.stop_conditions_json as typeof campaign.stop_conditions_json
+        : { max_messages: 50, max_days: 14, max_no_reply_hours: 72 };
+
     // ── Stop conditions check ──────────────────────────────────
-    const stopResult = await evaluateStopConditions(db, conversation, campaign.stop_conditions_json);
+    const stopResult = await evaluateStopConditions(db, conversation, effectiveStopConditions);
     if (stopResult.should_stop) {
       console.log(`Conversation ${conversation_id} stopped: ${stopResult.reason}`);
       await conversationService.setOutcome(conversation_id, ConversationOutcome.NoResponse);
@@ -94,10 +108,18 @@ export default async (req: Request, _context: Context) => {
       return new Response('Stopped', { status: 200 });
     }
 
+    // ── Resolve business hours (campaign override > workspace default) ──
+    let effectiveBusinessHours = campaign.business_hours_json;
+    const hasCampaignHours = effectiveBusinessHours?.schedule?.length > 0;
+
+    if (!hasCampaignHours && workspace?.business_hours_json && 'schedule' in workspace.business_hours_json) {
+      effectiveBusinessHours = workspace.business_hours_json as typeof effectiveBusinessHours;
+    }
+
     // ── Business hours check ───────────────────────────────────
-    const hasBusinessHours = campaign.business_hours_json?.schedule?.length > 0;
-    if (hasBusinessHours && !isWithinBusinessHours(campaign.business_hours_json, lead.timezone)) {
-      const nextOpen = getNextBusinessHoursStart(campaign.business_hours_json, lead.timezone);
+    const hasBusinessHours = effectiveBusinessHours?.schedule?.length > 0;
+    if (hasBusinessHours && !isWithinBusinessHours(effectiveBusinessHours, lead.timezone)) {
+      const nextOpen = getNextBusinessHoursStart(effectiveBusinessHours, lead.timezone);
       if (nextOpen) {
         // Re-queue for next business hours window
         const queueService = new QueueService(db);

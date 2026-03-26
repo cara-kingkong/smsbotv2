@@ -2,6 +2,7 @@
 import type { AuthSession } from '@lib/auth/middleware';
 import { ensureWorkspace } from '@lib/auth/ensure-workspace';
 import { getPublicSupabaseConfig } from '@lib/config/public-server';
+import { getServiceClient } from '@lib/db/client';
 
 interface Props {
   title: string;
@@ -10,7 +11,30 @@ interface Props {
 // Session is guaranteed by middleware — all non-public routes are authenticated
 const session = (Astro.locals as Record<string, unknown>).session as AuthSession;
 const workspaceId = await ensureWorkspace(session);
-const publicConfig = getPublicSupabaseConfig();
+
+// Fetch user display name and workspace name for the sidebar
+const db = getServiceClient();
+const { data: userRow } = await db
+  .from('users')
+  .select('full_name')
+  .eq('id', session.user_id)
+  .single();
+
+const { data: workspaceRow } = await db
+  .from('workspaces')
+  .select('name')
+  .eq('id', workspaceId)
+  .single();
+
+const userName = userRow?.full_name || session.email.split('@')[0];
+const workspaceName = workspaceRow?.name || 'Workspace';
+
+const publicConfig = getPublicSupabaseConfig({
+  workspaceId,
+  userId: session.user_id,
+  userEmail: session.email,
+  userName,
+});
 
 const currentPath = Astro.url.pathname;
 
@@ -30,6 +54,8 @@ const adminNav = [
 const bottomNav = [
   { href: '/settings', label: 'Settings' },
 ];
+
+const userInitial = userName.charAt(0).toUpperCase();
 ---
 
 <!doctype html>
@@ -104,6 +130,25 @@ const bottomNav = [
                 {link.label}
               </a>
             ))}
+          </div>
+
+          <!-- User / Workspace context -->
+          <div class="border-t border-slate-700 px-4 py-3">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 font-semibold text-sm shrink-0">
+                {userInitial}
+              </div>
+              <div class="min-w-0">
+                <div class="text-sm font-medium text-slate-200 truncate">{userName}</div>
+                <div class="text-[11px] text-slate-500 truncate">{workspaceName}</div>
+              </div>
+            </div>
+            <a
+              href="/auth/logout"
+              class="block mt-2 text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
+            >
+              Sign out
+            </a>
           </div>
         </nav>
       </aside>

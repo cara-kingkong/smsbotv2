@@ -3,6 +3,10 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 export interface PublicSupabaseConfig {
   supabaseUrl: string;
   supabaseAnonKey: string;
+  workspaceId: string;
+  userId: string;
+  userEmail: string;
+  userName: string;
 }
 
 declare global {
@@ -34,12 +38,45 @@ export function getPublicSupabaseConfig(): PublicSupabaseConfig {
     // loading state; on the client the real values will be injected via
     // window.__KONG_PUBLIC_CONFIG__ from BaseLayout.
     if (typeof window === 'undefined') {
-      return { supabaseUrl: '', supabaseAnonKey: '' };
+      return {
+        supabaseUrl: '',
+        supabaseAnonKey: '',
+        workspaceId: '',
+        userId: '',
+        userEmail: '',
+        userName: '',
+      };
     }
     throw new Error('Missing Supabase client config');
   }
 
-  return { supabaseUrl, supabaseAnonKey };
+  return {
+    supabaseUrl,
+    supabaseAnonKey,
+    workspaceId: runtimeConfig?.workspaceId ?? '',
+    userId: runtimeConfig?.userId ?? '',
+    userEmail: runtimeConfig?.userEmail ?? '',
+    userName: runtimeConfig?.userName ?? '',
+  };
+}
+
+/**
+ * Get the current workspace and user context injected by the server.
+ * Use this in Vue components instead of querying workspace_users directly.
+ */
+export function getSessionContext(): {
+  workspaceId: string;
+  userId: string;
+  userEmail: string;
+  userName: string;
+} {
+  const config = typeof window !== 'undefined' ? window.__KONG_PUBLIC_CONFIG__ : undefined;
+  return {
+    workspaceId: config?.workspaceId ?? '',
+    userId: config?.userId ?? '',
+    userEmail: config?.userEmail ?? '',
+    userName: config?.userName ?? '',
+  };
 }
 
 /**

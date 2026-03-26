@@ -36,6 +36,32 @@ export const createCampaignSchema = z.object({
     .optional(),
 });
 
+/** Business hours JSON schema (reusable) */
+export const businessHoursSchema = z.object({
+  timezone: z.string(),
+  schedule: z.array(
+    z.object({
+      day: z.number().min(0).max(6),
+      start: z.string().regex(/^\d{2}:\d{2}$/),
+      end: z.string().regex(/^\d{2}:\d{2}$/),
+    }),
+  ),
+});
+
+/** Stop conditions JSON schema (reusable) */
+export const stopConditionsSchema = z.object({
+  max_messages: z.number().min(1),
+  max_days: z.number().min(1),
+  max_no_reply_hours: z.number().min(1),
+});
+
+/** Workspace settings update schema */
+export const updateWorkspaceSettingsSchema = z.object({
+  workspace_id: z.string().uuid(),
+  business_hours_json: businessHoursSchema.optional(),
+  stop_conditions_json: stopConditionsSchema.optional(),
+});
+
 /** Agent creation schema */
 export const createAgentSchema = z.object({
   campaign_id: z.string().uuid(),

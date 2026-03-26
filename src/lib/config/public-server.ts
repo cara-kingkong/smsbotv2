@@ -1,13 +1,26 @@
 export interface PublicSupabaseConfig {
   supabaseUrl: string;
   supabaseAnonKey: string;
+  workspaceId: string;
+  userId: string;
+  userEmail: string;
+  userName: string;
 }
 
 function firstDefined(...values: Array<string | undefined>): string {
   return values.find((value) => value && value.length > 0) ?? '';
 }
 
-export function getPublicSupabaseConfig(): PublicSupabaseConfig {
+/**
+ * Build the public config that gets injected into window.__KONG_PUBLIC_CONFIG__.
+ * Accepts optional session context to pass workspace/user info to Vue components.
+ */
+export function getPublicSupabaseConfig(context?: {
+  workspaceId?: string;
+  userId?: string;
+  userEmail?: string;
+  userName?: string;
+}): PublicSupabaseConfig {
   const supabaseUrl = firstDefined(
     import.meta.env.PUBLIC_SUPABASE_URL,
     import.meta.env.SUPABASE_URL,
@@ -25,5 +38,12 @@ export function getPublicSupabaseConfig(): PublicSupabaseConfig {
     throw new Error('Missing Supabase public config');
   }
 
-  return { supabaseUrl, supabaseAnonKey };
+  return {
+    supabaseUrl,
+    supabaseAnonKey,
+    workspaceId: context?.workspaceId ?? '',
+    userId: context?.userId ?? '',
+    userEmail: context?.userEmail ?? '',
+    userName: context?.userName ?? '',
+  };
 }

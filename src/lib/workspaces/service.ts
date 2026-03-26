@@ -49,6 +49,18 @@ export class WorkspaceService {
     return data;
   }
 
+  async update(id: string, updates: Partial<Pick<Workspace, 'name' | 'business_hours_json' | 'stop_conditions_json'>>): Promise<Workspace> {
+    const { data, error } = await this.db
+      .from('workspaces')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw new Error(`Failed to update workspace: ${error.message}`);
+    return data;
+  }
+
   async getMembership(workspaceId: string, userId: string): Promise<WorkspaceUser | null> {
     const { data, error } = await this.db
       .from('workspace_users')

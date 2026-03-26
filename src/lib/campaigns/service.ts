@@ -20,11 +20,7 @@ export class CampaignService {
         name: input.name,
         status: EntityStatus.Active,
         business_hours_json: input.business_hours_json ?? {},
-        stop_conditions_json: input.stop_conditions_json ?? {
-          max_messages: 50,
-          max_days: 14,
-          max_no_reply_hours: 72,
-        },
+        stop_conditions_json: input.stop_conditions_json ?? {},
       })
       .select()
       .single();

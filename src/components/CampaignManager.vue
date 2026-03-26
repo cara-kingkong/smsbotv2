@@ -82,91 +82,118 @@
           <fieldset class="border border-slate-700 rounded-lg p-4 space-y-3">
             <legend class="text-sm font-medium text-slate-300 px-1">Business Hours</legend>
 
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Timezone</label>
-              <select
-                v-model="form.timezone"
-                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-              >
-                <option value="America/New_York">Eastern (ET)</option>
-                <option value="America/Chicago">Central (CT)</option>
-                <option value="America/Denver">Mountain (MT)</option>
-                <option value="America/Los_Angeles">Pacific (PT)</option>
-              </select>
+            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                v-model="form.useCustomHours"
+                class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
+              />
+              Override workspace defaults
+            </label>
+
+            <div v-if="!form.useCustomHours" class="text-xs text-slate-400 bg-slate-800/50 rounded px-3 py-2">
+              Using workspace default business hours. You can change them in <a href="/settings" class="text-blue-400 hover:text-blue-300">Settings</a>.
             </div>
 
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Active Days</label>
-              <div class="flex flex-wrap gap-2">
-                <label
-                  v-for="(dayLabel, dayIndex) in dayLabels"
-                  :key="dayIndex"
-                  class="flex items-center gap-1.5 text-sm text-slate-300 cursor-pointer"
+            <template v-if="form.useCustomHours">
+              <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Timezone</label>
+                <select
+                  v-model="form.timezone"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
                 >
-                  <input
-                    type="checkbox"
-                    :value="dayIndex"
-                    v-model="form.activeDays"
-                    class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
-                  />
-                  {{ dayLabel }}
-                </label>
+                  <option v-for="tz in timezoneOptions" :key="tz.value" :value="tz.value">{{ tz.label }}</option>
+                </select>
               </div>
-            </div>
 
-            <div class="grid grid-cols-2 gap-3">
               <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">Start Time</label>
-                <select
-                  v-model="form.startTime"
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-                >
-                  <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
-                </select>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Active Days</label>
+                <div class="flex flex-wrap gap-2">
+                  <label
+                    v-for="(dayLabel, dayIndex) in dayLabels"
+                    :key="dayIndex"
+                    class="flex items-center gap-1.5 text-sm text-slate-300 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      :value="dayIndex"
+                      v-model="form.activeDays"
+                      class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
+                    />
+                    {{ dayLabel }}
+                  </label>
+                </div>
               </div>
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">End Time</label>
-                <select
-                  v-model="form.endTime"
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-                >
-                  <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
-                </select>
+
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-sm font-medium text-slate-300 mb-1">Start Time</label>
+                  <select
+                    v-model="form.startTime"
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                  >
+                    <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-slate-300 mb-1">End Time</label>
+                  <select
+                    v-model="form.endTime"
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                  >
+                    <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
+                  </select>
+                </div>
               </div>
-            </div>
+            </template>
           </fieldset>
 
           <!-- Stop Conditions -->
           <fieldset class="border border-slate-700 rounded-lg p-4 space-y-3">
             <legend class="text-sm font-medium text-slate-300 px-1">Stop Conditions</legend>
 
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Max Messages</label>
+            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
               <input
-                v-model.number="form.maxMessages"
-                type="number"
-                min="1"
-                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+                type="checkbox"
+                v-model="form.useCustomStopConditions"
+                class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
               />
+              Override workspace defaults
+            </label>
+
+            <div v-if="!form.useCustomStopConditions" class="text-xs text-slate-400 bg-slate-800/50 rounded px-3 py-2">
+              Using workspace default stop conditions. You can change them in <a href="/settings" class="text-blue-400 hover:text-blue-300">Settings</a>.
             </div>
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Max Days</label>
-              <input
-                v-model.number="form.maxDays"
-                type="number"
-                min="1"
-                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Max No-Reply Hours</label>
-              <input
-                v-model.number="form.maxNoReplyHours"
-                type="number"
-                min="1"
-                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-              />
-            </div>
+
+            <template v-if="form.useCustomStopConditions">
+              <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Max Messages</label>
+                <input
+                  v-model.number="form.maxMessages"
+                  type="number"
+                  min="1"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Max Days</label>
+                <input
+                  v-model.number="form.maxDays"
+                  type="number"
+                  min="1"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Max No-Reply Hours</label>
+                <input
+                  v-model.number="form.maxNoReplyHours"
+                  type="number"
+                  min="1"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </template>
           </fieldset>
 
           <!-- Success/Error messages -->
@@ -232,91 +259,118 @@
           <fieldset class="border border-slate-700 rounded-lg p-4 space-y-3">
             <legend class="text-sm font-medium text-slate-300 px-1">Business Hours</legend>
 
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Timezone</label>
-              <select
-                v-model="detail.timezone"
-                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-              >
-                <option value="America/New_York">Eastern (ET)</option>
-                <option value="America/Chicago">Central (CT)</option>
-                <option value="America/Denver">Mountain (MT)</option>
-                <option value="America/Los_Angeles">Pacific (PT)</option>
-              </select>
+            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                v-model="detail.useCustomHours"
+                class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
+              />
+              Override workspace defaults
+            </label>
+
+            <div v-if="!detail.useCustomHours" class="text-xs text-slate-400 bg-slate-800/50 rounded px-3 py-2">
+              Using workspace default business hours. You can change them in <a href="/settings" class="text-blue-400 hover:text-blue-300">Settings</a>.
             </div>
 
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Active Days</label>
-              <div class="flex flex-wrap gap-2">
-                <label
-                  v-for="(dayLabel, dayIndex) in dayLabels"
-                  :key="dayIndex"
-                  class="flex items-center gap-1.5 text-sm text-slate-300 cursor-pointer"
+            <template v-if="detail.useCustomHours">
+              <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Timezone</label>
+                <select
+                  v-model="detail.timezone"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
                 >
-                  <input
-                    type="checkbox"
-                    :value="dayIndex"
-                    v-model="detail.activeDays"
-                    class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
-                  />
-                  {{ dayLabel }}
-                </label>
+                  <option v-for="tz in timezoneOptions" :key="tz.value" :value="tz.value">{{ tz.label }}</option>
+                </select>
               </div>
-            </div>
 
-            <div class="grid grid-cols-2 gap-3">
               <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">Start Time</label>
-                <select
-                  v-model="detail.startTime"
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-                >
-                  <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
-                </select>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Active Days</label>
+                <div class="flex flex-wrap gap-2">
+                  <label
+                    v-for="(dayLabel, dayIndex) in dayLabels"
+                    :key="dayIndex"
+                    class="flex items-center gap-1.5 text-sm text-slate-300 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      :value="dayIndex"
+                      v-model="detail.activeDays"
+                      class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
+                    />
+                    {{ dayLabel }}
+                  </label>
+                </div>
               </div>
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">End Time</label>
-                <select
-                  v-model="detail.endTime"
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-                >
-                  <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
-                </select>
+
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-sm font-medium text-slate-300 mb-1">Start Time</label>
+                  <select
+                    v-model="detail.startTime"
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                  >
+                    <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-slate-300 mb-1">End Time</label>
+                  <select
+                    v-model="detail.endTime"
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                  >
+                    <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
+                  </select>
+                </div>
               </div>
-            </div>
+            </template>
           </fieldset>
 
           <!-- Stop Conditions Edit -->
           <fieldset class="border border-slate-700 rounded-lg p-4 space-y-3">
             <legend class="text-sm font-medium text-slate-300 px-1">Stop Conditions</legend>
 
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Max Messages</label>
+            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
               <input
-                v-model.number="detail.maxMessages"
-                type="number"
-                min="1"
-                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+                type="checkbox"
+                v-model="detail.useCustomStopConditions"
+                class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
               />
+              Override workspace defaults
+            </label>
+
+            <div v-if="!detail.useCustomStopConditions" class="text-xs text-slate-400 bg-slate-800/50 rounded px-3 py-2">
+              Using workspace default stop conditions. You can change them in <a href="/settings" class="text-blue-400 hover:text-blue-300">Settings</a>.
             </div>
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Max Days</label>
-              <input
-                v-model.number="detail.maxDays"
-                type="number"
-                min="1"
-                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Max No-Reply Hours</label>
-              <input
-                v-model.number="detail.maxNoReplyHours"
-                type="number"
-                min="1"
-                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-              />
-            </div>
+
+            <template v-if="detail.useCustomStopConditions">
+              <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Max Messages</label>
+                <input
+                  v-model.number="detail.maxMessages"
+                  type="number"
+                  min="1"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Max Days</label>
+                <input
+                  v-model.number="detail.maxDays"
+                  type="number"
+                  min="1"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Max No-Reply Hours</label>
+                <input
+                  v-model.number="detail.maxNoReplyHours"
+                  type="number"
+                  min="1"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </template>
           </fieldset>
 
           <!-- Save Success/Error -->
@@ -367,10 +421,10 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { getPublicSupabaseClient } from '@lib/config/public-client';
+import { getSessionContext } from '@lib/config/public-client';
+import { timezoneOptions } from '@lib/utils/timezones';
 
-const API_BASE = '/.netlify/functions';
-const supabase = getPublicSupabaseClient();
+const API_BASE = '/api';
 
 interface CampaignRecord {
   id: string;
@@ -411,10 +465,12 @@ const activeTab = ref<'create' | 'detail'>('create');
 // Create form state
 const form = ref({
   name: '',
+  useCustomHours: false,
   timezone: 'America/New_York',
   activeDays: [1, 2, 3, 4, 5] as number[],
   startTime: '09:00',
   endTime: '17:00',
+  useCustomStopConditions: false,
   maxMessages: 50,
   maxDays: 14,
   maxNoReplyHours: 72,
@@ -427,10 +483,12 @@ const formSuccess = ref('');
 const detail = ref({
   name: '',
   status: 'active',
+  useCustomHours: false,
   timezone: 'America/New_York',
   activeDays: [] as number[],
   startTime: '09:00',
   endTime: '17:00',
+  useCustomStopConditions: false,
   maxMessages: 50,
   maxDays: 14,
   maxNoReplyHours: 72,
@@ -463,16 +521,9 @@ function statusClass(status: string): string {
   }
 }
 
-async function resolveWorkspace(): Promise<string | null> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) return null;
-  const { data } = await supabase
-    .from('workspace_users')
-    .select('workspace_id')
-    .eq('user_id', session.user.id)
-    .limit(1)
-    .single();
-  return data?.workspace_id ?? null;
+function resolveWorkspace(): string | null {
+  const { workspaceId } = getSessionContext();
+  return workspaceId || null;
 }
 
 async function fetchCampaigns() {
@@ -515,17 +566,21 @@ async function createCampaign() {
       body: JSON.stringify({
         workspace_id: workspaceId,
         name: form.value.name,
-        business_hours_json: buildBusinessHoursJson(
-          form.value.timezone,
-          form.value.activeDays,
-          form.value.startTime,
-          form.value.endTime,
-        ),
-        stop_conditions_json: buildStopConditionsJson(
-          form.value.maxMessages,
-          form.value.maxDays,
-          form.value.maxNoReplyHours,
-        ),
+        business_hours_json: form.value.useCustomHours
+          ? buildBusinessHoursJson(
+              form.value.timezone,
+              form.value.activeDays,
+              form.value.startTime,
+              form.value.endTime,
+            )
+          : {},
+        stop_conditions_json: form.value.useCustomStopConditions
+          ? buildStopConditionsJson(
+              form.value.maxMessages,
+              form.value.maxDays,
+              form.value.maxNoReplyHours,
+            )
+          : {},
       }),
     });
 
@@ -539,10 +594,12 @@ async function createCampaign() {
     formSuccess.value = `Campaign "${data.name}" created successfully.`;
     form.value = {
       name: '',
+      useCustomHours: false,
       timezone: 'America/New_York',
       activeDays: [1, 2, 3, 4, 5],
       startTime: '09:00',
       endTime: '17:00',
+      useCustomStopConditions: false,
       maxMessages: 50,
       maxDays: 14,
       maxNoReplyHours: 72,
@@ -578,14 +635,18 @@ async function selectCampaign(campaign: CampaignRecord) {
 
     const bh = data.business_hours_json;
     const sc = data.stop_conditions_json;
+    const hasCustomHours = bh?.schedule?.length > 0;
+    const hasCustomStopConditions = sc?.max_messages !== undefined && Object.keys(sc).length > 0;
 
     detail.value = {
       name: data.name,
       status: data.status,
+      useCustomHours: hasCustomHours,
       timezone: bh?.timezone ?? 'America/New_York',
       activeDays: bh?.schedule?.map((s: { day: number }) => s.day) ?? [1, 2, 3, 4, 5],
       startTime: bh?.schedule?.[0]?.start ?? '09:00',
       endTime: bh?.schedule?.[0]?.end ?? '17:00',
+      useCustomStopConditions: hasCustomStopConditions,
       maxMessages: sc?.max_messages ?? 50,
       maxDays: sc?.max_days ?? 14,
       maxNoReplyHours: sc?.max_no_reply_hours ?? 72,
@@ -613,17 +674,21 @@ async function saveCampaign() {
         campaign_id: selectedCampaign.value.id,
         name: detail.value.name,
         status: detail.value.status,
-        business_hours_json: buildBusinessHoursJson(
-          detail.value.timezone,
-          detail.value.activeDays,
-          detail.value.startTime,
-          detail.value.endTime,
-        ),
-        stop_conditions_json: buildStopConditionsJson(
-          detail.value.maxMessages,
-          detail.value.maxDays,
-          detail.value.maxNoReplyHours,
-        ),
+        business_hours_json: detail.value.useCustomHours
+          ? buildBusinessHoursJson(
+              detail.value.timezone,
+              detail.value.activeDays,
+              detail.value.startTime,
+              detail.value.endTime,
+            )
+          : {},
+        stop_conditions_json: detail.value.useCustomStopConditions
+          ? buildStopConditionsJson(
+              detail.value.maxMessages,
+              detail.value.maxDays,
+              detail.value.maxNoReplyHours,
+            )
+          : {},
       }),
     });
 
@@ -661,7 +726,7 @@ function formatDate(iso: string): string {
 }
 
 onMounted(async () => {
-  workspaceId = await resolveWorkspace();
+  workspaceId = resolveWorkspace();
   if (!workspaceId) {
     listLoading.value = false;
     return;

@@ -106,20 +106,34 @@
             />
           </div>
 
-          <div>
+          <div class="relative" ref="timezoneContainerRef">
             <label class="block text-sm font-medium text-slate-300 mb-1">Timezone</label>
-            <select
-              v-model="form.timezone"
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+            <input
+              v-model="timezoneSearch"
+              type="text"
+              placeholder="Search timezones..."
+              autocomplete="off"
+              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+              @focus="showTimezoneDropdown = true"
+              @input="onTimezoneInput"
+            />
+            <div v-if="form.timezone && !showTimezoneDropdown" class="text-[12px] text-slate-400 mt-1">
+              Selected: {{ form.timezone }}
+            </div>
+            <div
+              v-if="showTimezoneDropdown && filteredTimezones.length > 0"
+              class="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto bg-slate-900 border border-slate-700 rounded-lg shadow-lg"
             >
-              <option value="">Select timezone...</option>
-              <option value="America/New_York">Eastern (ET)</option>
-              <option value="America/Chicago">Central (CT)</option>
-              <option value="America/Denver">Mountain (MT)</option>
-              <option value="America/Los_Angeles">Pacific (PT)</option>
-              <option value="America/Anchorage">Alaska (AKT)</option>
-              <option value="Pacific/Honolulu">Hawaii (HT)</option>
-            </select>
+              <div
+                v-for="tz in filteredTimezones"
+                :key="tz"
+                class="px-3 py-2 text-sm text-slate-200 cursor-pointer hover:bg-slate-700 transition-colors"
+                :class="{ 'bg-slate-800 text-blue-400': form.timezone === tz }"
+                @mousedown.prevent="selectTimezone(tz)"
+              >
+                {{ tz }}
+              </div>
+            </div>
           </div>
 
           <div>
@@ -214,8 +228,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { getPublicSupabaseClient } from '@lib/config/public-client';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { getPublicSupabaseClient, getSessionContext } from '@lib/config/public-client';
 
 const API_BASE = '/.netlify/functions';
 const supabase = getPublicSupabaseClient();
@@ -258,20 +272,64 @@ const startConvLoading = ref(false);
 const startConvError = ref('');
 const startConvSuccess = ref('');
 
+// Timezone combobox state
+const allTimezones: string[] = (() => {
+  try {
+    return Intl.supportedValuesOf('timeZone');
+  } catch {
+    // Fallback for older browsers
+    return [
+      'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+      'America/Anchorage', 'Pacific/Honolulu', 'America/Phoenix', 'America/Toronto',
+      'America/Vancouver', 'America/Winnipeg', 'America/Halifax', 'America/St_Johns',
+      'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow',
+      'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Kolkata', 'Asia/Dubai',
+      'Australia/Sydney', 'Australia/Perth', 'Pacific/Auckland',
+      'Africa/Cairo', 'Africa/Johannesburg', 'Africa/Lagos',
+    ];
+  }
+})();
+const timezoneSearch = ref('');
+const showTimezoneDropdown = ref(false);
+const timezoneContainerRef = ref<HTMLElement | null>(null);
+
+const filteredTimezones = computed(() => {
+  const query = timezoneSearch.value.toLowerCase().trim();
+  if (!query) return allTimezones.slice(0, 50);
+  return allTimezones.filter(tz => tz.toLowerCase().includes(query)).slice(0, 50);
+});
+
+function onTimezoneInput() {
+  showTimezoneDropdown.value = true;
+  // Clear selection if the user edits the search after selecting
+  if (form.value.timezone && timezoneSearch.value !== form.value.timezone) {
+    form.value.timezone = '';
+  }
+}
+
+function selectTimezone(tz: string) {
+  form.value.timezone = tz;
+  timezoneSearch.value = tz;
+  showTimezoneDropdown.value = false;
+}
+
+function handleClickOutsideTimezone(e: MouseEvent) {
+  if (timezoneContainerRef.value && !timezoneContainerRef.value.contains(e.target as Node)) {
+    showTimezoneDropdown.value = false;
+    // Restore display to selected value if user didn't pick anything
+    if (form.value.timezone) {
+      timezoneSearch.value = form.value.timezone;
+    }
+  }
+}
+
 let workspaceId: string | null = null;
 let campaignId: string | null = null;
 let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 
-async function resolveWorkspace(): Promise<string | null> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) return null;
-  const { data } = await supabase
-    .from('workspace_users')
-    .select('workspace_id')
-    .eq('user_id', session.user.id)
-    .limit(1)
-    .single();
-  return data?.workspace_id ?? null;
+function resolveWorkspace(): string | null {
+  const { workspaceId } = getSessionContext();
+  return workspaceId || null;
 }
 
 async function resolveDefaultCampaign(): Promise<string | null> {
@@ -331,6 +389,7 @@ async function createLead() {
 
     formSuccess.value = `Lead created: ${data.first_name} ${data.last_name || ''} (${data.phone_e164})`;
     form.value = { phone: '', first_name: '', last_name: '', email: '', timezone: '', external_contact_id: '' };
+    timezoneSearch.value = '';
     await fetchLeads();
   } catch {
     formError.value = 'Network error. Please try again.';
@@ -408,12 +467,17 @@ function formatDate(iso: string): string {
 }
 
 onMounted(async () => {
-  workspaceId = await resolveWorkspace();
+  document.addEventListener('click', handleClickOutsideTimezone);
+  workspaceId = resolveWorkspace();
   if (!workspaceId) {
     listLoading.value = false;
     return;
   }
   await fetchLeads();
   listLoading.value = false;
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleClickOutsideTimezone);
 });
 </script>

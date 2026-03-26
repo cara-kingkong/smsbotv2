@@ -21,6 +21,8 @@ export interface Workspace {
   name: string;
   slug: string;
   status: EntityStatus;
+  business_hours_json: BusinessHours | Record<string, never>;
+  stop_conditions_json: StopConditions | Record<string, never>;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;

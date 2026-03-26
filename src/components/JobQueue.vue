@@ -106,10 +106,9 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { getPublicSupabaseClient } from '@lib/config/public-client';
+import { getSessionContext } from '@lib/config/public-client';
 
 const API_BASE = '/.netlify/functions';
-const supabase = getPublicSupabaseClient();
 
 interface JobRecord {
   id: string;
@@ -225,16 +224,9 @@ function formatDate(iso: string | null): string {
   });
 }
 
-async function resolveWorkspace(): Promise<string | null> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) return null;
-  const { data } = await supabase
-    .from('workspace_users')
-    .select('workspace_id')
-    .eq('user_id', session.user.id)
-    .limit(1)
-    .single();
-  return data?.workspace_id ?? null;
+function resolveWorkspace(): string | null {
+  const { workspaceId } = getSessionContext();
+  return workspaceId || null;
 }
 
 async function fetchJobs() {
@@ -283,7 +275,7 @@ async function retryJob(jobId: string) {
 }
 
 onMounted(async () => {
-  workspaceId = await resolveWorkspace();
+  workspaceId = resolveWorkspace();
   if (!workspaceId) {
     loading.value = false;
     return;

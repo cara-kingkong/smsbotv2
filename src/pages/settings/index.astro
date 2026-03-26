@@ -1,5 +1,6 @@
 ---
 import BaseLayout from '@layouts/BaseLayout.astro';
+import WorkspaceSettings from '@components/WorkspaceSettings.vue';
 import IntegrationManager from '@components/IntegrationManager.vue';
 ---
 
@@ -9,5 +10,15 @@ import IntegrationManager from '@components/IntegrationManager.vue';
     <p class="text-sm text-slate-400 mt-1">Workspace configuration and integrations</p>
   </div>
 
-  <IntegrationManager client:load />
+  <div class="space-y-8">
+    <section>
+      <h2 class="text-lg font-semibold mb-4">Workspace Defaults</h2>
+      <WorkspaceSettings client:load />
+    </section>
+
+    <section>
+      <h2 class="text-lg font-semibold mb-4">Integrations</h2>
+      <IntegrationManager client:load />
+    </section>
+  </div>
 </BaseLayout>
