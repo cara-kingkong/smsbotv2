@@ -1,5 +1,5 @@
 -- ============================================================
--- RuFlo SMS Chatbot — Development Seed Data
+-- Kong SMS Chatbot — Development Seed Data
 -- ============================================================
 -- This file populates the database with realistic demo data for
 -- local development and testing. It is idempotent — safe to run

@@ -1,4 +1,4 @@
-# sms-chatbot-ruflo
+# kong-sms
 
 > Multi-agent orchestration framework for agentic coding
 

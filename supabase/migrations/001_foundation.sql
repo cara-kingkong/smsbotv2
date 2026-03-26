@@ -1,5 +1,5 @@
 -- ============================================================
--- RuFlo SMS Chatbot — Foundation Schema
+-- Kong SMS Chatbot — Foundation Schema
 -- ============================================================
 
 -- Enable required extensions

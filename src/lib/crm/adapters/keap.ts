@@ -42,7 +42,7 @@ export class KeapAdapter implements CRMAdapter {
       body: JSON.stringify({
         contact_id: input.external_contact_id,
         body: input.note_body,
-        title: 'RuFlo SMS Chatbot',
+        title: 'Kong SMS Chatbot',
         type: 'Other',
       }),
     });

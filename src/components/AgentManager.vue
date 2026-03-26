@@ -332,7 +332,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
-import { createClient } from '@supabase/supabase-js';
+import { getPublicSupabaseClient } from '@lib/config/public-client';
 
 const props = defineProps<{
   campaignId: string;
@@ -340,10 +340,7 @@ const props = defineProps<{
 }>();
 
 const API_BASE = '/.netlify/functions';
-const supabase = createClient(
-  (import.meta as any).env.PUBLIC_SUPABASE_URL ?? '',
-  (import.meta as any).env.PUBLIC_SUPABASE_ANON_KEY ?? '',
-);
+const supabase = getPublicSupabaseClient();
 
 interface AgentRecord {
   id: string;

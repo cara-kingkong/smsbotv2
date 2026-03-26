@@ -215,13 +215,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { createClient } from '@supabase/supabase-js';
+import { getPublicSupabaseClient } from '@lib/config/public-client';
 
 const API_BASE = '/.netlify/functions';
-const supabase = createClient(
-  (import.meta as any).env.PUBLIC_SUPABASE_URL ?? '',
-  (import.meta as any).env.PUBLIC_SUPABASE_ANON_KEY ?? '',
-);
+const supabase = getPublicSupabaseClient();
 
 interface LeadRecord {
   id: string;

@@ -51,7 +51,7 @@ export class CalendlyAdapter implements CalendarAdapter {
     try {
       await this.request(`/scheduled_events/${bookingId}/cancellation`, {
         method: 'POST',
-        body: JSON.stringify({ reason: 'Cancelled via RuFlo' }),
+        body: JSON.stringify({ reason: 'Cancelled via Kong SMS' }),
       });
       return { success: true };
     } catch {

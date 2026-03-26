@@ -1117,7 +1117,24 @@ AI coding agents may simplify by:
 
 ---
 
-# 13. Summary
+# 13. Auto-Provisioning (Migration 004)
+
+## 13.1 Trigger: `on_auth_user_created`
+Fires after each new row in `auth.users`. Calls `handle_new_user()` which:
+1. Inserts a mirror row into `public.users`
+2. Creates a default workspace named `"{name}'s Workspace"`
+3. Adds the user as `owner` in `workspace_users`
+
+The slug is derived from the email prefix plus a random UUID suffix for uniqueness.
+
+## 13.2 App-Layer Guarantee
+The `ensureWorkspace()` function (`src/lib/auth/ensure-workspace.ts`) runs on every authenticated page load via `BaseLayout.astro`. It checks whether the user already has a workspace membership and creates one if missing. This covers:
+- Users who existed before migration 004
+- Edge cases where the DB trigger may not have fired (e.g., manual user creation)
+
+---
+
+# 14. Summary
 This schema is designed to support a multi-workspace, integration-heavy, AI-assisted SMS conversation platform with clean history, reliable async processing, and durable reporting inputs.
 
 The most important schema decisions are:

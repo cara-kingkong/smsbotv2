@@ -1,8 +1,10 @@
 ---
-import { getSession } from '@lib/auth/middleware';
+import { getPublicSupabaseConfig } from '@lib/config/public-server';
 
-const session = await getSession(Astro);
-if (session) return Astro.redirect('/dashboard');
+// Middleware skips /login — check if already authenticated to redirect
+const existingSession = (Astro.locals as Record<string, unknown>).session;
+if (existingSession) return Astro.redirect('/dashboard');
+const publicConfig = getPublicSupabaseConfig();
 ---
 
 <!doctype html>
@@ -10,7 +12,10 @@ if (session) return Astro.redirect('/dashboard');
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Sign In | RuFlo SMS</title>
+    <title>Sign In | Kong SMS</title>
+    <script define:vars={{ publicConfig }}>
+      window.__KONG_PUBLIC_CONFIG__ = publicConfig;
+    </script>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body {
@@ -53,7 +58,7 @@ if (session) return Astro.redirect('/dashboard');
   </head>
   <body>
     <div class="login-card">
-      <h1>RuFlo SMS</h1>
+      <h1>Kong SMS</h1>
       <p>Sign in to manage your SMS chatbot campaigns</p>
       <button class="btn-google" id="google-signin">
         Sign in with Google
@@ -62,11 +67,11 @@ if (session) return Astro.redirect('/dashboard');
 
     <script>
       import { createClient } from '@supabase/supabase-js';
+      import { getPublicSupabaseConfig } from '@lib/config/public-client';
 
-      const supabase = createClient(
-        import.meta.env.PUBLIC_SUPABASE_URL ?? '',
-        import.meta.env.PUBLIC_SUPABASE_ANON_KEY ?? '',
-      );
+      const { supabaseUrl, supabaseAnonKey } = getPublicSupabaseConfig();
+
+      const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
       document.getElementById('google-signin')?.addEventListener('click', async () => {
         const { error } = await supabase.auth.signInWithOAuth({

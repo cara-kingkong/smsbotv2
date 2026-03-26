@@ -4,6 +4,9 @@
  * Supabase redirects here after Google sign-in.
  * Extracts tokens from URL hash and sets secure cookies.
  */
+import { getPublicSupabaseConfig } from '@lib/config/public-server';
+
+const publicConfig = getPublicSupabaseConfig();
 ---
 
 <!doctype html>
@@ -11,17 +14,20 @@
   <head>
     <meta charset="UTF-8" />
     <title>Authenticating...</title>
+    <script define:vars={{ publicConfig }}>
+      window.__KONG_PUBLIC_CONFIG__ = publicConfig;
+    </script>
   </head>
   <body>
     <p>Signing in...</p>
 
     <script>
       import { createClient } from '@supabase/supabase-js';
+      import { getPublicSupabaseConfig } from '@lib/config/public-client';
 
-      const supabase = createClient(
-        import.meta.env.PUBLIC_SUPABASE_URL ?? '',
-        import.meta.env.PUBLIC_SUPABASE_ANON_KEY ?? '',
-      );
+      const { supabaseUrl, supabaseAnonKey } = getPublicSupabaseConfig();
+
+      const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
       async function handleCallback() {
         const { data, error } = await supabase.auth.getSession();

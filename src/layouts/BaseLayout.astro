@@ -1,10 +1,17 @@
 ---
+import type { AuthSession } from '@lib/auth/middleware';
+import { ensureWorkspace } from '@lib/auth/ensure-workspace';
+import { getPublicSupabaseConfig } from '@lib/config/public-server';
+
 interface Props {
   title: string;
-  requireAuth?: boolean;
 }
 
-const { title, requireAuth = false } = Astro.props;
+// Session is guaranteed by middleware — all non-public routes are authenticated
+const session = (Astro.locals as Record<string, unknown>).session as AuthSession;
+const workspaceId = await ensureWorkspace(session);
+const publicConfig = getPublicSupabaseConfig();
+
 const currentPath = Astro.url.pathname;
 
 const mainNav = [
@@ -30,7 +37,10 @@ const bottomNav = [
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{title} | RuFlo SMS</title>
+    <title>Kong SMS</title>
+    <script define:vars={{ publicConfig }}>
+      window.__KONG_PUBLIC_CONFIG__ = publicConfig;
+    </script>
     <style>
       @import "../styles/global.css";
     </style>
@@ -40,7 +50,7 @@ const bottomNav = [
       <!-- Sidebar -->
       <aside class="w-60 bg-surface border-r border-slate-700 flex flex-col shrink-0">
         <div class="px-6 py-5 border-b border-slate-700 text-xl font-bold text-blue-500">
-          RuFlo SMS
+          Kong SMS
         </div>
         <nav class="flex-1 py-4 flex flex-col">
           <!-- Main navigation -->

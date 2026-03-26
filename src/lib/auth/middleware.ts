@@ -73,3 +73,5 @@ export async function requireAuth(Astro: AstroGlobal): Promise<AuthSession> {
   }
   return session;
 }
+
+export { ensureWorkspace } from './ensure-workspace';

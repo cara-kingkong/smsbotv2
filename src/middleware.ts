@@ -1,0 +1,77 @@
+import { defineMiddleware } from 'astro:middleware';
+import { getSupabaseClient } from '@lib/db/client';
+
+/** Routes that do NOT require authentication */
+const PUBLIC_ROUTES = ['/login', '/auth/callback'];
+
+function isPublic(pathname: string): boolean {
+  return PUBLIC_ROUTES.some((route) => pathname === route || pathname.startsWith(route + '/'));
+}
+
+export const onRequest = defineMiddleware(async ({ cookies, url, redirect, locals }, next) => {
+  if (isPublic(url.pathname)) {
+    return next();
+  }
+
+  const accessToken = cookies.get('sb-access-token')?.value;
+  const refreshToken = cookies.get('sb-refresh-token')?.value;
+
+  if (!accessToken) {
+    return redirect('/login');
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.auth.getUser(accessToken);
+
+  if (error || !data.user) {
+    // Try refreshing the token
+    if (refreshToken) {
+      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession({
+        refresh_token: refreshToken,
+      });
+
+      if (refreshError || !refreshData.session) {
+        // Clear stale cookies and redirect to login
+        cookies.delete('sb-access-token', { path: '/' });
+        cookies.delete('sb-refresh-token', { path: '/' });
+        return redirect('/login');
+      }
+
+      // Update cookies with fresh tokens
+      cookies.set('sb-access-token', refreshData.session.access_token, {
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        maxAge: 60 * 60,
+      });
+      cookies.set('sb-refresh-token', refreshData.session.refresh_token, {
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 7,
+      });
+
+      (locals as Record<string, unknown>).session = {
+        user_id: refreshData.session.user.id,
+        email: refreshData.session.user.email ?? '',
+        access_token: refreshData.session.access_token,
+      };
+
+      return next();
+    }
+
+    cookies.delete('sb-access-token', { path: '/' });
+    cookies.delete('sb-refresh-token', { path: '/' });
+    return redirect('/login');
+  }
+
+  (locals as Record<string, unknown>).session = {
+    user_id: data.user.id,
+    email: data.user.email ?? '',
+    access_token: accessToken,
+  };
+
+  return next();
+});
