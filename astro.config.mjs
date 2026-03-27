@@ -18,5 +18,8 @@ export default defineConfig({
         '@layouts': '/src/layouts',
       },
     },
+    server: {
+      allowedHosts: ['webhooks-dev.kingkong.net.au'],
+    },
   },
 });

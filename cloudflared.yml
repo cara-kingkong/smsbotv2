@@ -1,0 +1,7 @@
+tunnel: webhooks-dev
+credentials-file: /Users/caragammon/.cloudflared/82882157-159f-413a-9101-3da79f193f13.json
+
+ingress:
+  - hostname: webhooks-dev.kingkong.net.au
+    service: http://localhost:4321
+  - service: http_status:404

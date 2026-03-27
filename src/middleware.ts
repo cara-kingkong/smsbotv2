@@ -8,9 +8,28 @@ function isPublic(pathname: string): boolean {
   return PUBLIC_ROUTES.some((route) => pathname === route || pathname.startsWith(route + '/'));
 }
 
+function hasOAuthCallbackParams(url: URL): boolean {
+  return (
+    url.searchParams.has('code') ||
+    url.searchParams.has('error_code') ||
+    url.searchParams.has('error_description')
+  );
+}
+
+function withNoStore(response: Response): Response {
+  response.headers.set('Cache-Control', 'private, no-store');
+  return response;
+}
+
 export const onRequest = defineMiddleware(async ({ cookies, url, redirect, locals }, next) => {
+  if (url.pathname !== '/auth/callback' && hasOAuthCallbackParams(url)) {
+    const callbackUrl = new URL('/auth/callback', url);
+    callbackUrl.search = url.search;
+    return redirect(`${callbackUrl.pathname}${callbackUrl.search}`);
+  }
+
   if (isPublic(url.pathname)) {
-    return next();
+    return withNoStore(await next());
   }
 
   const accessToken = cookies.get('sb-access-token')?.value;
@@ -60,7 +79,7 @@ export const onRequest = defineMiddleware(async ({ cookies, url, redirect, local
         access_token: refreshData.session.access_token,
       };
 
-      return next();
+      return withNoStore(await next());
     }
 
     cookies.delete('sb-access-token', { path: '/' });
@@ -74,5 +93,5 @@ export const onRequest = defineMiddleware(async ({ cookies, url, redirect, local
     access_token: accessToken,
   };
 
-  return next();
+  return withNoStore(await next());
 });

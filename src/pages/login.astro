@@ -110,13 +110,24 @@ const publicConfig = getPublicSupabaseConfig();
 
       const { supabaseUrl, supabaseAnonKey } = getPublicSupabaseConfig();
 
-      const supabase = createClient(supabaseUrl, supabaseAnonKey);
+      const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          flowType: 'pkce',
+          storage: window.localStorage,
+          storageKey: 'sb-auth-token',
+        },
+      });
+
+      function getAuthRedirectUrl() {
+        const baseUrl = import.meta.env.PUBLIC_SITE_URL || window.location.origin;
+        return new URL('/auth/callback', baseUrl).toString();
+      }
 
       document.getElementById('google-signin')?.addEventListener('click', async () => {
         const { error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
           options: {
-            redirectTo: `${window.location.origin}/auth/callback`,
+            redirectTo: getAuthRedirectUrl(),
           },
         });
         if (error) console.error('Sign-in error:', error.message);

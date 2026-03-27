@@ -2,7 +2,8 @@
 /**
  * OAuth callback handler.
  * Supabase redirects here after Google sign-in.
- * Extracts tokens from URL hash and sets secure cookies.
+ * For PKCE flow, we handle this client-side since the code verifier
+ * is stored in the browser's local storage.
  */
 import { getPublicSupabaseConfig } from '@lib/config/public-server';
 
@@ -27,23 +28,86 @@ const publicConfig = getPublicSupabaseConfig();
 
       const { supabaseUrl, supabaseAnonKey } = getPublicSupabaseConfig();
 
-      const supabase = createClient(supabaseUrl, supabaseAnonKey);
+      const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          flowType: 'pkce',
+          detectSessionInUrl: false,
+          storage: window.localStorage,
+          storageKey: 'sb-auth-token',
+        },
+      });
 
-      async function handleCallback() {
-        const { data, error } = await supabase.auth.getSession();
+      function getHashParams() {
+        const hash = window.location.hash.startsWith('#')
+          ? window.location.hash.slice(1)
+          : window.location.hash;
+        return new URLSearchParams(hash);
+      }
 
-        if (error || !data.session) {
-          console.error('Auth callback error:', error?.message);
-          window.location.href = '/login';
-          return;
+      function setSessionCookies(session) {
+        const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie =
+          `sb-access-token=${encodeURIComponent(session.access_token)}; path=/; max-age=3600; SameSite=Lax${secure}`;
+        document.cookie =
+          `sb-refresh-token=${encodeURIComponent(session.refresh_token)}; path=/; max-age=604800; SameSite=Lax${secure}`;
+      }
+
+      async function resolveSession() {
+        const queryParams = new URLSearchParams(window.location.search);
+        const hashParams = getHashParams();
+
+        const authError =
+          queryParams.get('error_description') ||
+          hashParams.get('error_description') ||
+          queryParams.get('error') ||
+          hashParams.get('error');
+
+        if (authError) {
+          throw new Error(authError);
         }
 
-        // Set cookies for SSR auth — only add Secure flag when on HTTPS
-        const secure = window.location.protocol === 'https:' ? '; Secure' : '';
-        document.cookie = `sb-access-token=${data.session.access_token}; path=/; max-age=3600; SameSite=Lax${secure}`;
-        document.cookie = `sb-refresh-token=${data.session.refresh_token}; path=/; max-age=604800; SameSite=Lax${secure}`;
+        const code = queryParams.get('code');
+        if (code) {
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+          return data.session;
+        }
 
-        window.location.href = '/dashboard';
+        const accessToken = hashParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token');
+        if (accessToken && refreshToken) {
+          const { data, error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (error) throw error;
+          return data.session;
+        }
+
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        return data.session;
+      }
+
+      async function handleCallback() {
+        try {
+          const session = await resolveSession();
+
+          if (!session) {
+            console.error('No session returned');
+            window.location.href = '/login';
+            return;
+          }
+
+          console.log('Session obtained, setting cookies...');
+          setSessionCookies(session);
+
+          console.log('Redirecting to dashboard...');
+          window.location.replace('/dashboard');
+        } catch (err) {
+          console.error('Unexpected error:', err);
+          window.location.replace('/login');
+        }
       }
 
       handleCallback();

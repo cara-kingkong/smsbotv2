@@ -13,7 +13,8 @@
     "db:migrate": "supabase db push",
     "db:reset": "supabase db reset",
     "db:seed": "tsx supabase/seed/index.ts",
-    "netlify:dev": "netlify dev"
+    "netlify:dev": "netlify dev",
+    "tunnel": "cloudflared --loglevel info tunnel --config ./cloudflared.yml run 2>&1 | tee -a cloudflared.log"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
