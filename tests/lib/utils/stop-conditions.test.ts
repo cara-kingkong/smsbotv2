@@ -17,10 +17,7 @@ function createMockDb(overrides?: {
 
   // When chain is used without .single() (the messages list query), resolve with data array
   // We handle this by making the chain itself thenable for the list case
-  let callCount = 0;
-  const originalLimit = chain.limit;
   chain.limit = vi.fn().mockImplementation(() => {
-    callCount++;
     // The second .from('messages') call (list query) doesn't call .single()
     return {
       ...chain,

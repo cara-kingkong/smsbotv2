@@ -1,6 +1,5 @@
 import type { Context } from '@netlify/functions';
-import { getServiceClient } from '../../src/lib/db/client';
-import { WorkspaceService } from '../../src/lib/workspaces/service';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * Get workspace settings (business hours + stop conditions).
@@ -11,28 +10,17 @@ export default async (req: Request, _context: Context) => {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
   }
 
-  const db = getServiceClient();
-
   try {
     const url = new URL(req.url);
     const workspaceId = url.searchParams.get('workspace_id');
-
-    if (!workspaceId) {
-      return new Response(JSON.stringify({ error: 'Missing workspace_id' }), { status: 400 });
-    }
-
-    const workspaceService = new WorkspaceService(db);
-    const workspace = await workspaceService.getById(workspaceId);
-
-    if (!workspace) {
-      return new Response(JSON.stringify({ error: 'Workspace not found' }), { status: 404 });
-    }
+    const access = await requireWorkspaceAccess(req, workspaceId);
+    if (access instanceof Response) return access;
 
     return new Response(JSON.stringify({
-      id: workspace.id,
-      name: workspace.name,
-      business_hours_json: workspace.business_hours_json,
-      stop_conditions_json: workspace.stop_conditions_json,
+      id: access.workspace.id,
+      name: access.workspace.name,
+      business_hours_json: access.workspace.business_hours_json,
+      stop_conditions_json: access.workspace.stop_conditions_json,
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

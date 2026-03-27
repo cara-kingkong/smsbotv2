@@ -2,6 +2,7 @@ import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { ReportingService } from '../../src/lib/reporting/service';
 import type { CampaignMetrics } from '../../src/lib/reporting/service';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * Fetch full workspace reporting: workspace-level metrics plus per-campaign
@@ -18,21 +19,19 @@ export default async (req: Request, _context: Context) => {
   try {
     const url = new URL(req.url);
     const workspaceId = url.searchParams.get('workspace_id');
-
-    if (!workspaceId) {
-      return new Response(JSON.stringify({ error: 'workspace_id is required' }), { status: 400 });
-    }
+    const access = await requireWorkspaceAccess(req, workspaceId);
+    if (access instanceof Response) return access;
 
     const reportingService = new ReportingService(db);
 
     // Fetch workspace-level metrics
-    const workspaceMetrics = await reportingService.getWorkspaceMetrics(workspaceId);
+    const workspaceMetrics = await reportingService.getWorkspaceMetrics(access.workspace.id);
 
     // Fetch all campaigns for this workspace
     const { data: campaigns, error } = await db
       .from('campaigns')
       .select('id')
-      .eq('workspace_id', workspaceId)
+      .eq('workspace_id', access.workspace.id)
       .is('deleted_at', null);
 
     if (error) throw new Error(`Failed to fetch campaigns: ${error.message}`);

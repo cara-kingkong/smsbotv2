@@ -1,6 +1,7 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { ConversationStatus } from '../../src/lib/types';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * List inbox conversations for a workspace.
@@ -16,10 +17,8 @@ export default async (req: Request, _context: Context) => {
   try {
     const url = new URL(req.url);
     const workspaceId = url.searchParams.get('workspace_id');
-
-    if (!workspaceId) {
-      return new Response(JSON.stringify({ error: 'workspace_id is required' }), { status: 400 });
-    }
+    const access = await requireWorkspaceAccess(req, workspaceId);
+    if (access instanceof Response) return access;
 
     const statusFilter = url.searchParams.get('status');
     const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '50', 10), 100);
@@ -47,7 +46,7 @@ export default async (req: Request, _context: Context) => {
         lead:leads(id, first_name, last_name, phone_e164, email),
         last_message:messages(id, body_text, sender_type, direction, created_at)
       `)
-      .eq('workspace_id', workspaceId)
+      .eq('workspace_id', access.workspace.id)
       .is('deleted_at', null)
       .order('last_activity_at', { ascending: false })
       .limit(1, { foreignTable: 'messages' })

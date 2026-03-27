@@ -1,5 +1,6 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * List activity logs for a workspace.
@@ -15,10 +16,8 @@ export default async (req: Request, _context: Context) => {
   try {
     const url = new URL(req.url);
     const workspaceId = url.searchParams.get('workspace_id');
-
-    if (!workspaceId) {
-      return new Response(JSON.stringify({ error: 'workspace_id is required' }), { status: 400 });
-    }
+    const access = await requireWorkspaceAccess(req, workspaceId);
+    if (access instanceof Response) return access;
 
     const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '50', 10), 100);
     const entityType = url.searchParams.get('entity_type')?.trim();
@@ -26,7 +25,7 @@ export default async (req: Request, _context: Context) => {
     let query = db
       .from('activity_logs')
       .select('*')
-      .eq('workspace_id', workspaceId)
+      .eq('workspace_id', access.workspace.id)
       .order('created_at', { ascending: false });
 
     if (entityType) {

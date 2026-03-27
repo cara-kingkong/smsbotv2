@@ -1,8 +1,10 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
+import { JobStatus } from '../../src/lib/types';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
- * List jobs for a workspace.
+ * List jobs in the queue for a workspace.
  * GET /.netlify/functions/api-jobs-list?workspace_id=...&status=...&limit=...
  */
 export default async (req: Request, _context: Context) => {
@@ -15,15 +17,14 @@ export default async (req: Request, _context: Context) => {
   try {
     const url = new URL(req.url);
     const workspaceId = url.searchParams.get('workspace_id');
+    const access = await requireWorkspaceAccess(req, workspaceId);
+    if (access instanceof Response) return access;
 
-    if (!workspaceId) {
-      return new Response(JSON.stringify({ error: 'workspace_id is required' }), { status: 400 });
-    }
-
-    const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '50', 10), 100);
+    const parsedLimit = Number.parseInt(url.searchParams.get('limit') ?? '50', 10);
+    const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 50;
     const status = url.searchParams.get('status')?.trim();
 
-    const validStatuses = ['queued', 'processing', 'completed', 'failed', 'dead_lettered'];
+    const validStatuses = Object.values(JobStatus);
 
     if (status && !validStatuses.includes(status)) {
       return new Response(
@@ -35,7 +36,7 @@ export default async (req: Request, _context: Context) => {
     let query = db
       .from('jobs')
       .select('*')
-      .eq('workspace_id', workspaceId)
+      .eq('workspace_id', access.workspace.id)
       .order('created_at', { ascending: false })
       .limit(limit);
 

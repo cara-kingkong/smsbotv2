@@ -1,6 +1,8 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { AgentService } from '../../src/lib/agents/service';
+import { CampaignService } from '../../src/lib/campaigns/service';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * Create an agent within a campaign.
@@ -26,15 +28,29 @@ export default async (req: Request, _context: Context) => {
       );
     }
 
-    // Validate campaign exists
-    const { data: campaign, error: campError } = await db
-      .from('campaigns')
-      .select('id')
-      .eq('id', campaign_id)
-      .single();
-
-    if (campError || !campaign) {
+    const campaignService = new CampaignService(db);
+    const campaign = await campaignService.getById(campaign_id);
+    if (!campaign) {
       return new Response(JSON.stringify({ error: 'Campaign not found' }), { status: 404 });
+    }
+
+    const access = await requireWorkspaceAccess(req, campaign.workspace_id);
+    if (access instanceof Response) return access;
+
+    if (ai_provider_integration_id) {
+      const { data: integration, error: integrationError } = await db
+        .from('integrations')
+        .select('id, workspace_id')
+        .eq('id', ai_provider_integration_id)
+        .single();
+
+      if (integrationError || !integration) {
+        return new Response(JSON.stringify({ error: 'Integration not found' }), { status: 404 });
+      }
+
+      if (integration.workspace_id !== campaign.workspace_id) {
+        return new Response(JSON.stringify({ error: 'Integration does not belong to this workspace' }), { status: 403 });
+      }
     }
 
     const agentService = new AgentService(db);

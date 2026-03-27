@@ -93,6 +93,7 @@ export default async (req: Request, _context: Context) => {
     // Queue initial AI reply job
     const queueService = new QueueService(db);
     await queueService.enqueue({
+      workspace_id: payload.workspace_id,
       job_type: 'generate_ai_reply',
       queue_name: 'ai',
       payload: {

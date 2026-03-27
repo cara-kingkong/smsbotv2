@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { AgentService } from '../../../src/lib/agents/service';
 import { EntityStatus } from '../../../src/lib/types';
 import type { Agent, AgentVersion } from '../../../src/lib/types';
@@ -60,8 +60,8 @@ describe('AgentService', () => {
       const version = makeVersion({ agent_id: 'a1' });
 
       const db = {
-        from: vi.fn().mockImplementation((table: string) => {
-          if (table === 'agents') {
+        from: vi.fn().mockImplementation((_table: string) => {
+          if (_table === 'agents') {
             // Chain: .select().eq().is().eq() — all must return this
             const agentChain = {
               select: vi.fn().mockReturnThis(),
@@ -122,8 +122,8 @@ describe('AgentService', () => {
       const agents = [makeAgent({ id: 'a1', weight: 1 })];
 
       const db = {
-        from: vi.fn().mockImplementation((table: string) => {
-          if (table === 'agents') {
+        from: vi.fn().mockImplementation((_table: string) => {
+          if (_table === 'agents') {
             const agentChain: Record<string, any> = {
               select: vi.fn().mockReturnThis(),
               is: vi.fn().mockReturnThis(),
@@ -159,7 +159,7 @@ describe('AgentService', () => {
       let fromCallCount = 0;
       const updateEqMock = vi.fn().mockResolvedValue({ data: null, error: null });
       const db = {
-        from: vi.fn().mockImplementation((table: string) => {
+        from: vi.fn().mockImplementation((_table: string) => {
           fromCallCount++;
           if (fromCallCount === 1) {
             // First call: get latest version_number

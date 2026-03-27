@@ -1,5 +1,6 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * Fetch dashboard stats for a workspace.
@@ -15,16 +16,14 @@ export default async (req: Request, _context: Context) => {
   try {
     const url = new URL(req.url);
     const workspaceId = url.searchParams.get('workspace_id');
-
-    if (!workspaceId) {
-      return new Response(JSON.stringify({ error: 'workspace_id is required' }), { status: 400 });
-    }
+    const access = await requireWorkspaceAccess(req, workspaceId);
+    if (access instanceof Response) return access;
 
     // Fetch all non-deleted conversations for workspace
     const { data: conversations, error } = await db
       .from('conversations')
       .select('id, status, outcome')
-      .eq('workspace_id', workspaceId)
+      .eq('workspace_id', access.workspace.id)
       .is('deleted_at', null);
 
     if (error) throw new Error(`Failed to fetch stats: ${error.message}`);

@@ -6,6 +6,7 @@ import { LeadService } from '../../src/lib/leads/service';
 import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
 import { ConversationStatus, SenderType, ConversationEventType } from '../../src/lib/types';
 import { sendManualMessageSchema } from '../../src/lib/utils/validation';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * Send a manual human reply in a conversation.
@@ -39,6 +40,9 @@ export default async (req: Request, _context: Context) => {
     if (!conversation) {
       return new Response(JSON.stringify({ error: 'Conversation not found' }), { status: 404 });
     }
+
+    const access = await requireWorkspaceAccess(req, conversation.workspace_id);
+    if (access instanceof Response) return access;
 
     // Prevent replies on terminal conversations
     const terminalStatuses = [

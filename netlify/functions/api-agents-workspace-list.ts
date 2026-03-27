@@ -1,6 +1,7 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { AgentService } from '../../src/lib/agents/service';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * List all agents for a workspace (across all campaigns).
@@ -16,13 +17,11 @@ export default async (req: Request, _context: Context) => {
   try {
     const url = new URL(req.url);
     const workspaceId = url.searchParams.get('workspace_id');
-
-    if (!workspaceId) {
-      return new Response(JSON.stringify({ error: 'workspace_id is required' }), { status: 400 });
-    }
+    const access = await requireWorkspaceAccess(req, workspaceId);
+    if (access instanceof Response) return access;
 
     const agentService = new AgentService(db);
-    const agents = await agentService.listByWorkspace(workspaceId);
+    const agents = await agentService.listByWorkspace(access.workspace.id);
 
     return new Response(JSON.stringify(agents), {
       status: 200,

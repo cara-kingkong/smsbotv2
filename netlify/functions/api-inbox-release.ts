@@ -2,6 +2,7 @@ import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { ConversationService } from '../../src/lib/conversations/service';
 import { QueueService } from '../../src/lib/queues/service';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * Release a conversation back to AI control.
@@ -29,6 +30,9 @@ export default async (req: Request, _context: Context) => {
       return new Response(JSON.stringify({ error: 'Conversation not found' }), { status: 404 });
     }
 
+    const access = await requireWorkspaceAccess(req, conversation.workspace_id);
+    if (access instanceof Response) return access;
+
     if (!conversation.human_controlled) {
       return new Response(
         JSON.stringify({ error: 'Conversation is not currently human-controlled' }),
@@ -42,6 +46,7 @@ export default async (req: Request, _context: Context) => {
     // Queue an AI reply job so AI picks up where it left off
     const queueService = new QueueService(db);
     await queueService.enqueue({
+      workspace_id: conversation.workspace_id,
       job_type: 'generate_ai_reply',
       queue_name: 'ai',
       payload: {

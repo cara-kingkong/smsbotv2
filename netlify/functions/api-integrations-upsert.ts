@@ -1,6 +1,7 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { IntegrationService } from '../../src/lib/integrations/service';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 const VALID_TYPES = ['crm', 'calendar', 'sms', 'ai_provider'];
 const VALID_PROVIDERS = ['twilio', 'calendly', 'keap', 'openai', 'anthropic'];
@@ -46,21 +47,13 @@ export default async (req: Request, _context: Context) => {
       );
     }
 
-    // Validate workspace exists
-    const { data: workspace, error: wsError } = await db
-      .from('workspaces')
-      .select('id')
-      .eq('id', workspace_id)
-      .single();
-
-    if (wsError || !workspace) {
-      return new Response(JSON.stringify({ error: 'Workspace not found' }), { status: 404 });
-    }
+    const access = await requireWorkspaceAccess(req, workspace_id);
+    if (access instanceof Response) return access;
 
     const service = new IntegrationService(db);
 
     // Check if integration for this workspace+provider already exists
-    const existing = await service.listByWorkspace(workspace_id);
+    const existing = await service.listByWorkspace(access.workspace.id);
     const match = existing.find((i) => i.provider === provider);
 
     if (match) {
@@ -78,7 +71,7 @@ export default async (req: Request, _context: Context) => {
 
     // Create new integration
     const created = await service.create({
-      workspace_id,
+      workspace_id: access.workspace.id,
       type,
       provider,
       name,

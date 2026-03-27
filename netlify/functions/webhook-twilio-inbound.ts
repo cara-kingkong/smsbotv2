@@ -3,7 +3,8 @@ import { getServiceClient } from '../../src/lib/db/client';
 import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
 import { MessagingService } from '../../src/lib/messaging/service';
 import { QueueService } from '../../src/lib/queues/service';
-import { ConversationStatus, CRMEventType } from '../../src/lib/types';
+import { ConversationOutcome, ConversationStatus, CRMEventType } from '../../src/lib/types';
+import { ConversationService } from '../../src/lib/conversations/service';
 import { CRMService } from '../../src/lib/crm/service';
 
 /**
@@ -20,30 +21,20 @@ export default async (req: Request, _context: Context) => {
     process.env.TWILIO_ACCOUNT_SID!,
     process.env.TWILIO_AUTH_TOKEN!,
   );
+  let receiptId: string | null = null;
 
   try {
     const bodyText = await req.text();
-    const body = Object.fromEntries(new URLSearchParams(bodyText));
+    const body = Object.fromEntries(new URLSearchParams(bodyText)) as Record<string, string>;
 
-    // Validate webhook signature
-    const headers = Object.fromEntries(req.headers.entries());
-    const isValid = twilioAdapter.validateWebhookSignature(headers, JSON.stringify(body));
+    // Validate webhook signature before touching the database.
+    const isValid = twilioAdapter.validateWebhookSignature(req.url, req.headers, body);
     if (!isValid) {
       console.warn('Invalid Twilio webhook signature');
-      // Continue for development; enforce in production
+      return new Response('Unauthorized', { status: 401 });
     }
 
     const inbound = twilioAdapter.parseInboundWebhook(body);
-
-    // Store raw receipt
-    await db.from('webhook_receipts').insert({
-      workspace_id: '00000000-0000-0000-0000-000000000000', // Resolved below
-      source_type: 'twilio_inbound',
-      source_identifier: inbound.from,
-      idempotency_key: inbound.provider_message_id,
-      payload_json: inbound.raw_payload,
-      processed_status: 'processing',
-    });
 
     // Find active conversation by inbound phone number
     const { data: lead } = await db
@@ -60,6 +51,32 @@ export default async (req: Request, _context: Context) => {
         headers: { 'Content-Type': 'text/xml' },
       });
     }
+
+    const { data: receipt, error: receiptError } = await db
+      .from('webhook_receipts')
+      .insert({
+        workspace_id: lead.workspace_id,
+        source_type: 'twilio_inbound',
+        source_identifier: inbound.from,
+        idempotency_key: inbound.provider_message_id,
+        payload_json: inbound.raw_payload,
+        processed_status: 'processing',
+      })
+      .select('id')
+      .single();
+
+    if (receiptError) {
+      if (receiptError.code === '23505' || receiptError.message.includes('duplicate key')) {
+        return new Response('<Response></Response>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/xml' },
+        });
+      }
+      throw new Error(`Failed to store webhook receipt: ${receiptError.message}`);
+    }
+
+    receiptId = receipt?.id ?? null;
+    const conversationService = new ConversationService(db);
 
     // Find active conversation for this lead
     const { data: conversation } = await db
@@ -80,6 +97,9 @@ export default async (req: Request, _context: Context) => {
 
     if (!conversation) {
       console.warn(`No active conversation for lead: ${lead.id}`);
+      if (receiptId) {
+        await db.from('webhook_receipts').update({ processed_status: 'completed' }).eq('id', receiptId);
+      }
       return new Response('<Response></Response>', {
         status: 200,
         headers: { 'Content-Type': 'text/xml' },
@@ -89,7 +109,8 @@ export default async (req: Request, _context: Context) => {
     // Check for opt-out keywords
     const optOutKeywords = ['stop', 'unsubscribe', 'cancel', 'quit', 'end'];
     if (optOutKeywords.includes(inbound.body.trim().toLowerCase())) {
-      await db.from('conversations').update({ status: ConversationStatus.OptedOut, outcome: 'opted_out' }).eq('id', conversation.id);
+      await conversationService.setOutcome(conversation.id, ConversationOutcome.OptedOut);
+      await conversationService.updateStatus(conversation.id, ConversationStatus.OptedOut);
       await db.from('leads').update({ opted_out: true }).eq('id', lead.id);
 
       // Emit CRM event for opt-out
@@ -120,11 +141,16 @@ export default async (req: Request, _context: Context) => {
 
           const queueService = new QueueService(db);
           await queueService.enqueue({
+            workspace_id: lead.workspace_id,
             job_type: 'process_crm_sync',
             queue_name: 'crm',
             payload: { crm_event_id: crmEvent.id, provider: crmIntegration.provider },
           });
         }
+      }
+
+      if (receiptId) {
+        await db.from('webhook_receipts').update({ processed_status: 'completed' }).eq('id', receiptId);
       }
 
       return new Response('<Response></Response>', {
@@ -141,19 +167,17 @@ export default async (req: Request, _context: Context) => {
       provider_message_id: inbound.provider_message_id,
     });
 
-    // Update conversation status
-    await db
-      .from('conversations')
-      .update({
-        status: ConversationStatus.Active,
-        last_activity_at: new Date().toISOString(),
-      })
-      .eq('id', conversation.id);
+    // Keep the conversation status aligned with who owns the thread.
+    await conversationService.updateStatus(
+      conversation.id,
+      conversation.human_controlled ? ConversationStatus.HumanControlled : ConversationStatus.Active,
+    );
 
     // If not human-controlled, queue AI evaluation
     if (!conversation.human_controlled) {
       const queueService = new QueueService(db);
       await queueService.enqueue({
+        workspace_id: lead.workspace_id,
         job_type: 'generate_ai_reply',
         queue_name: 'ai',
         payload: {
@@ -163,6 +187,10 @@ export default async (req: Request, _context: Context) => {
       });
     }
 
+    if (receiptId) {
+      await db.from('webhook_receipts').update({ processed_status: 'completed' }).eq('id', receiptId);
+    }
+
     // Respond with empty TwiML (no auto-response)
     return new Response('<Response></Response>', {
       status: 200,
@@ -170,6 +198,13 @@ export default async (req: Request, _context: Context) => {
     });
   } catch (err) {
     console.error('webhook-twilio-inbound error:', err);
+    if (receiptId) {
+      try {
+        await db.from('webhook_receipts').update({ processed_status: 'failed' }).eq('id', receiptId);
+      } catch (receiptErr) {
+        console.warn('Failed to mark Twilio webhook receipt as failed:', receiptErr);
+      }
+    }
     return new Response('<Response></Response>', {
       status: 200,
       headers: { 'Content-Type': 'text/xml' },

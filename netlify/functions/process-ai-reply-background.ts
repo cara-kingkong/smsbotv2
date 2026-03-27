@@ -12,7 +12,7 @@ import { QueueService } from '../../src/lib/queues/service';
 import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
 import { OpenAIAdapter } from '../../src/lib/ai/adapters/openai';
 import { AnthropicAdapter } from '../../src/lib/ai/adapters/anthropic';
-import { ConversationStatus, ConversationOutcome, SenderType, CRMEventType, MessageDirection } from '../../src/lib/types';
+import { ConversationStatus, ConversationOutcome, SenderType, CRMEventType, MessageDirection, ConversationEventType } from '../../src/lib/types';
 import { CRMService } from '../../src/lib/crm/service';
 import type { AIProviderAdapter } from '../../src/lib/types';
 import { isWithinBusinessHours, getNextBusinessHoursStart } from '../../src/lib/utils/business-hours';
@@ -72,8 +72,13 @@ export default async (req: Request, _context: Context) => {
     const twilioAdapter = new TwilioAdapter(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
     const messagingService = new MessagingService(db, twilioAdapter);
 
-    const version = await agentService.getActiveVersion(conversation.agent_id);
-    if (!version) throw new Error(`No active version for agent ${conversation.agent_id}`);
+    const version = await agentService.getVersionById(conversation.agent_version_id);
+    if (!version) throw new Error(`Conversation ${conversation_id} is missing agent version ${conversation.agent_version_id}`);
+    if (version.agent_id !== conversation.agent_id) {
+      throw new Error(
+        `Conversation ${conversation_id} references version ${version.id} that does not belong to agent ${conversation.agent_id}`,
+      );
+    }
 
     const lead = await leadService.getById(conversation.lead_id);
     if (!lead) throw new Error(`Lead not found: ${conversation.lead_id}`);
@@ -102,7 +107,7 @@ export default async (req: Request, _context: Context) => {
       await conversationService.updateStatus(conversation_id, ConversationStatus.Completed);
       await db.from('conversation_events').insert({
         conversation_id,
-        event_type: 'stop_condition_reached',
+        event_type: ConversationEventType.StopConditionReached,
         event_payload_json: { reason: stopResult.reason },
       });
       return new Response('Stopped', { status: 200 });
@@ -124,6 +129,7 @@ export default async (req: Request, _context: Context) => {
         // Re-queue for next business hours window
         const queueService = new QueueService(db);
         await queueService.enqueue({
+          workspace_id: conversation.workspace_id,
           job_type: 'generate_ai_reply',
           queue_name: 'ai',
           payload: { conversation_id, trigger: 'business_hours_deferred' },
@@ -233,6 +239,7 @@ export default async (req: Request, _context: Context) => {
           const followupRunAt = new Date(Date.now() + cadence.followup_delay_seconds * 1000);
           const queueService = new QueueService(db);
           await queueService.enqueue({
+            workspace_id: conversation.workspace_id,
             job_type: 'generate_ai_reply',
             queue_name: 'ai',
             payload: { conversation_id, trigger: 'followup_scheduled' },
@@ -250,6 +257,7 @@ export default async (req: Request, _context: Context) => {
     if (decision.should_book && decision.recommended_calendar_id) {
       const queueService = new QueueService(db);
       await queueService.enqueue({
+        workspace_id: conversation.workspace_id,
         job_type: 'process_booking',
         queue_name: 'booking',
         payload: {
@@ -304,6 +312,7 @@ export default async (req: Request, _context: Context) => {
 
         const crmQueueService = new QueueService(db);
         await crmQueueService.enqueue({
+          workspace_id: conversation.workspace_id,
           job_type: 'process_crm_sync',
           queue_name: 'crm',
           payload: { crm_event_id: crmEvent.id, provider: crmIntegration.provider },

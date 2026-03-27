@@ -2,6 +2,7 @@ import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { ConversationService } from '../../src/lib/conversations/service';
 import { ConversationStatus } from '../../src/lib/types';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * Human takeover of a conversation.
@@ -28,6 +29,9 @@ export default async (req: Request, _context: Context) => {
     if (!conversation) {
       return new Response(JSON.stringify({ error: 'Conversation not found' }), { status: 404 });
     }
+
+    const access = await requireWorkspaceAccess(req, conversation.workspace_id);
+    if (access instanceof Response) return access;
 
     // Prevent takeover on terminal conversations
     const terminalStatuses = [

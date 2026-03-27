@@ -1,6 +1,7 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { CampaignService } from '../../src/lib/campaigns/service';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * Update a campaign.
@@ -41,6 +42,14 @@ export default async (req: Request, _context: Context) => {
     }
 
     const campaignService = new CampaignService(db);
+    const existingCampaign = await campaignService.getById(campaign_id);
+    if (!existingCampaign) {
+      return new Response(JSON.stringify({ error: 'Campaign not found' }), { status: 404 });
+    }
+
+    const access = await requireWorkspaceAccess(req, existingCampaign.workspace_id);
+    if (access instanceof Response) return access;
+
     const campaign = await campaignService.update(campaign_id, updates);
 
     return new Response(JSON.stringify(campaign), {

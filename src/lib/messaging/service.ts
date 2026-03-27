@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Message, SMSAdapter, SendMessageInput } from '@lib/types';
+import type { Message, SMSAdapter } from '@lib/types';
 import { MessageDirection, SenderType } from '@lib/types';
 
 export interface QueueOutboundInput {

@@ -123,19 +123,14 @@
 
         <div v-if="!card.expanded" class="mt-6 flex flex-wrap gap-2">
           <button class="button-secondary flex-1" @click="openConfig(card)">Configure</button>
-          <button
-            class="button-ghost"
-            :class="!card.connected ? 'cursor-not-allowed opacity-50' : ''"
-            :disabled="!card.connected"
-            @click="toggleHealthCheck(card)"
-          >
-            {{ card.healthChecking ? 'Checking...' : 'Health Check' }}
+          <button class="button-ghost" :class="!card.connected ? 'cursor-not-allowed opacity-50' : ''" :disabled="!card.connected" @click="validateConfig(card)">
+            Validate config
           </button>
         </div>
 
-        <div v-if="card.healthResult !== null && !card.expanded" class="mt-4">
-          <div :class="card.healthResult ? 'feedback-success' : 'feedback-error'">
-            {{ card.healthResult ? 'Health check passed' : 'Health check failed' }}
+        <div v-if="card.validationMessage && !card.expanded" class="mt-4">
+          <div class="note-box">
+            {{ card.validationMessage }}
           </div>
         </div>
       </article>
@@ -162,8 +157,7 @@ interface ProviderCard {
   saving: boolean;
   saveSuccess: string;
   saveError: string;
-  healthChecking: boolean;
-  healthResult: boolean | null;
+  validationMessage: string;
   form: Record<string, string>;
 }
 
@@ -185,8 +179,7 @@ const providerCards = reactive<ProviderCard[]>([
     saving: false,
     saveSuccess: '',
     saveError: '',
-    healthChecking: false,
-    healthResult: null,
+    validationMessage: '',
     form: { label: '', account_sid: '', auth_token: '', phone_number: '' },
   },
   {
@@ -202,8 +195,7 @@ const providerCards = reactive<ProviderCard[]>([
     saving: false,
     saveSuccess: '',
     saveError: '',
-    healthChecking: false,
-    healthResult: null,
+    validationMessage: '',
     form: { label: '', api_key: '', model: 'gpt-4o' },
   },
   {
@@ -219,8 +211,7 @@ const providerCards = reactive<ProviderCard[]>([
     saving: false,
     saveSuccess: '',
     saveError: '',
-    healthChecking: false,
-    healthResult: null,
+    validationMessage: '',
     form: { label: '', api_key: '', model: 'claude-sonnet-4-20250514' },
   },
   {
@@ -236,8 +227,7 @@ const providerCards = reactive<ProviderCard[]>([
     saving: false,
     saveSuccess: '',
     saveError: '',
-    healthChecking: false,
-    healthResult: null,
+    validationMessage: '',
     form: { label: '', api_key: '' },
   },
   {
@@ -253,8 +243,7 @@ const providerCards = reactive<ProviderCard[]>([
     saving: false,
     saveSuccess: '',
     saveError: '',
-    healthChecking: false,
-    healthResult: null,
+    validationMessage: '',
     form: { label: '', api_key: '' },
   },
 ]);
@@ -294,7 +283,7 @@ function openConfig(card: ProviderCard) {
   card.expanded = true;
   card.saveSuccess = '';
   card.saveError = '';
-  card.healthResult = null;
+  card.validationMessage = '';
 }
 
 function buildConfigJson(card: ProviderCard): Record<string, unknown> {
@@ -365,14 +354,21 @@ async function saveIntegration(card: ProviderCard) {
   }
 }
 
-async function toggleHealthCheck(card: ProviderCard) {
-  if (card.healthChecking || !card.connected) return;
-  card.healthChecking = true;
-  card.healthResult = null;
+function validateConfig(card: ProviderCard) {
+  if (!card.connected) return;
 
-  await new Promise((resolve) => setTimeout(resolve, 800));
-  card.healthResult = true;
-  card.healthChecking = false;
+  const requiredFields: Record<string, string[]> = {
+    twilio: ['account_sid', 'auth_token', 'phone_number'],
+    openai: ['api_key', 'model'],
+    anthropic: ['api_key', 'model'],
+    calendly: ['api_key'],
+    keap: ['api_key'],
+  };
+
+  const missing = (requiredFields[card.provider] ?? []).filter((field) => !card.form[field]?.trim());
+  card.validationMessage = missing.length > 0
+    ? `Missing required fields: ${missing.join(', ')}`
+    : 'Configuration fields are present. Live provider checks run in the backend after deployment.';
 }
 
 onMounted(async () => {

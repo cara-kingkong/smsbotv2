@@ -2,6 +2,7 @@ import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { IntegrationService } from '../../src/lib/integrations/service';
 import type { IntegrationType } from '../../src/lib/types/enums';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 const VALID_TYPES = ['crm', 'calendar', 'sms', 'ai_provider'];
 
@@ -19,10 +20,8 @@ export default async (req: Request, _context: Context) => {
   try {
     const url = new URL(req.url);
     const workspaceId = url.searchParams.get('workspace_id');
-
-    if (!workspaceId) {
-      return new Response(JSON.stringify({ error: 'workspace_id is required' }), { status: 400 });
-    }
+    const access = await requireWorkspaceAccess(req, workspaceId);
+    if (access instanceof Response) return access;
 
     const typeParam = url.searchParams.get('type');
     if (typeParam && !VALID_TYPES.includes(typeParam)) {
@@ -34,7 +33,7 @@ export default async (req: Request, _context: Context) => {
 
     const service = new IntegrationService(db);
     const integrations = await service.listByWorkspace(
-      workspaceId,
+      access.workspace.id,
       typeParam as IntegrationType | undefined,
     );
 

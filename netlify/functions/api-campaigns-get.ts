@@ -2,6 +2,7 @@ import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { CampaignService } from '../../src/lib/campaigns/service';
 import { AgentService } from '../../src/lib/agents/service';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * Get a single campaign by ID, including its agents.
@@ -28,6 +29,9 @@ export default async (req: Request, _context: Context) => {
     if (!campaign) {
       return new Response(JSON.stringify({ error: 'Campaign not found' }), { status: 404 });
     }
+
+    const access = await requireWorkspaceAccess(req, campaign.workspace_id);
+    if (access instanceof Response) return access;
 
     const agentService = new AgentService(db);
     const agents = await agentService.listByCampaign(campaignId);

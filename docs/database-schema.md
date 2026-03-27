@@ -789,22 +789,17 @@ Stores async jobs for queue-backed workflows.
 
 ## Columns
 - `id` uuid pk
-- `workspace_id` uuid null references `workspaces(id)`
+- `workspace_id` uuid null references `workspaces(id)` on delete cascade
 - `job_type` text not null
 - `queue_name` text not null
-- `status` job_status not null default `queued`
-- `idempotency_key` text null
+- `status` job_status not null default `pending`
 - `payload_json` jsonb not null default '{}'::jsonb
 - `attempts` integer not null default 0
-- `max_attempts` integer not null default 5
+- `max_attempts` integer not null default 3
 - `run_at` timestamptz not null default now()
-- `locked_at` timestamptz null
-- `locked_by` text null
 - `last_error` text null
-- `completed_at` timestamptz null
 - `dead_lettered_at` timestamptz null
 - `created_at` timestamptz not null default now()
-- `updated_at` timestamptz not null default now()
 
 ## Example Job Types
 - `start_conversation`
@@ -816,10 +811,9 @@ Stores async jobs for queue-backed workflows.
 - `sync_delivery_status`
 
 ## Suggested Indexes
+- index on `workspace_id`
 - index on (`status`, `run_at`)
 - index on `queue_name`
-- index on `workspace_id`
-- unique index on (`queue_name`, `idempotency_key`) where `idempotency_key is not null`
 
 ---
 

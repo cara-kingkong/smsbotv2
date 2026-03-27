@@ -1,6 +1,7 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { AgentService } from '../../src/lib/agents/service';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * Create a new version for an agent.
@@ -26,16 +27,20 @@ export default async (req: Request, _context: Context) => {
       );
     }
 
-    // Validate agent exists
     const { data: agent, error: agentError } = await db
       .from('agents')
-      .select('id')
+      .select('id, campaigns!inner(workspace_id)')
       .eq('id', agent_id)
+      .is('deleted_at', null)
       .single();
 
     if (agentError || !agent) {
       return new Response(JSON.stringify({ error: 'Agent not found' }), { status: 404 });
     }
+
+    const workspaceId = (agent.campaigns as { workspace_id: string } | null)?.workspace_id;
+    const access = await requireWorkspaceAccess(req, workspaceId);
+    if (access instanceof Response) return access;
 
     const agentService = new AgentService(db);
     const version = await agentService.createVersion({

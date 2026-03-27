@@ -91,6 +91,7 @@ export default async (req: Request, _context: Context) => {
 
         const queueService = new QueueService(db);
         await queueService.enqueue({
+          workspace_id: conversation.workspace_id,
           job_type: 'process_crm_sync',
           queue_name: 'crm',
           payload: { crm_event_id: crmEvent.id, provider: crmIntegration.provider },

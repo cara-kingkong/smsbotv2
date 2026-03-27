@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ConversationService } from '../../../src/lib/conversations/service';
 import { ConversationStatus, ConversationEventType } from '../../../src/lib/types';
 import type { Conversation } from '../../../src/lib/types';
@@ -48,10 +48,8 @@ describe('ConversationService', () => {
       const created = makeConversation();
       const insertCalls: { table: string; data: unknown }[] = [];
 
-      let fromCallCount = 0;
       const db = {
         from: vi.fn().mockImplementation((table: string) => {
-          fromCallCount++;
           if (table === 'conversations') {
             return {
               insert: vi.fn().mockImplementation((data: unknown) => {
@@ -153,10 +151,8 @@ describe('ConversationService', () => {
       });
 
       const insertedEvents: unknown[] = [];
-      let fromCallCount = 0;
       const db = {
         from: vi.fn().mockImplementation((table: string) => {
-          fromCallCount++;
           if (table === 'conversations') {
             return {
               update: vi.fn().mockReturnValue({
@@ -261,6 +257,8 @@ describe('ConversationService', () => {
       expect(result.status).toBe(ConversationStatus.Completed);
       expect(updatePayload.closed_at).toBeDefined();
       expect(updatePayload.status).toBe(ConversationStatus.Completed);
+      expect(updatePayload.needs_human).toBe(false);
+      expect(updatePayload.human_controlled).toBe(false);
     });
 
     it('sets closed_at for OptedOut status', async () => {
@@ -289,6 +287,8 @@ describe('ConversationService', () => {
       await service.updateStatus('conv-1', ConversationStatus.OptedOut);
 
       expect(updatePayload.closed_at).toBeDefined();
+      expect(updatePayload.needs_human).toBe(false);
+      expect(updatePayload.human_controlled).toBe(false);
     });
 
     it('does not set closed_at for non-terminal statuses (Active)', async () => {
@@ -315,6 +315,8 @@ describe('ConversationService', () => {
 
       expect(updatePayload.closed_at).toBeUndefined();
       expect(updatePayload.status).toBe(ConversationStatus.Active);
+      expect(updatePayload.needs_human).toBe(false);
+      expect(updatePayload.human_controlled).toBe(false);
     });
   });
 });

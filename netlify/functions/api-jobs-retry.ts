@@ -1,11 +1,13 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
+import { JobStatus } from '../../src/lib/types';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
- * Retry a failed or dead-lettered job.
+ * Retry a failed or dead-lettered job within a workspace.
  * POST /.netlify/functions/api-jobs-retry
  *
- * Body: { job_id }
+ * Body: { workspace_id?, job_id }
  */
 export default async (req: Request, _context: Context) => {
   if (req.method !== 'POST') {
@@ -16,7 +18,7 @@ export default async (req: Request, _context: Context) => {
 
   try {
     const body = await req.json();
-    const { job_id } = body;
+    const { workspace_id, job_id } = body;
 
     if (!job_id) {
       return new Response(
@@ -25,10 +27,10 @@ export default async (req: Request, _context: Context) => {
       );
     }
 
-    // Verify the job exists and is in a retryable state
+    // Verify the job exists in the current workspace and is in a retryable state
     const { data: existing, error: fetchError } = await db
       .from('jobs')
-      .select('id, status')
+      .select('id, status, workspace_id')
       .eq('id', job_id)
       .single();
 
@@ -36,7 +38,14 @@ export default async (req: Request, _context: Context) => {
       return new Response(JSON.stringify({ error: 'Job not found' }), { status: 404 });
     }
 
-    const retryableStatuses = ['failed', 'dead_lettered'];
+    const access = await requireWorkspaceAccess(req, existing.workspace_id);
+    if (access instanceof Response) return access;
+
+    if (workspace_id && workspace_id !== existing.workspace_id) {
+      return new Response(JSON.stringify({ error: 'Job not found' }), { status: 404 });
+    }
+
+    const retryableStatuses = [JobStatus.Failed, JobStatus.DeadLettered];
     if (!retryableStatuses.includes(existing.status)) {
       return new Response(
         JSON.stringify({ error: `Job cannot be retried from status: ${existing.status}` }),
@@ -47,14 +56,14 @@ export default async (req: Request, _context: Context) => {
     const { data: updated, error: updateError } = await db
       .from('jobs')
       .update({
-        status: 'queued',
+        status: JobStatus.Pending,
         attempts: 0,
         last_error: null,
         dead_lettered_at: null,
         run_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
       })
       .eq('id', job_id)
+      .eq('workspace_id', existing.workspace_id)
       .select()
       .single();
 

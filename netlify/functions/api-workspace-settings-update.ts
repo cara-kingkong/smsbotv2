@@ -1,6 +1,7 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { WorkspaceService } from '../../src/lib/workspaces/service';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * Update workspace settings (business hours + stop conditions).
@@ -18,10 +19,8 @@ export default async (req: Request, _context: Context) => {
   try {
     const body = await req.json();
     const { workspace_id, business_hours_json, stop_conditions_json } = body;
-
-    if (!workspace_id) {
-      return new Response(JSON.stringify({ error: 'Missing workspace_id' }), { status: 400 });
-    }
+    const access = await requireWorkspaceAccess(req, workspace_id);
+    if (access instanceof Response) return access;
 
     const updates: Record<string, unknown> = {};
     if (business_hours_json !== undefined) updates.business_hours_json = business_hours_json;
@@ -32,7 +31,7 @@ export default async (req: Request, _context: Context) => {
     }
 
     const workspaceService = new WorkspaceService(db);
-    const workspace = await workspaceService.update(workspace_id, updates);
+    const workspace = await workspaceService.update(access.workspace.id, updates);
 
     return new Response(JSON.stringify({
       id: workspace.id,

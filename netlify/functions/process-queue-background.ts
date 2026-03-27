@@ -14,31 +14,27 @@ export default async (_req: Request, _context: Context) => {
 
   for (const queueName of queues) {
     try {
-      // Fetch pending jobs that are ready to run
-      const { data: jobs, error } = await db
-        .from('jobs')
-        .select('*')
-        .eq('queue_name', queueName)
-        .eq('status', 'pending')
-        .lte('run_at', new Date().toISOString())
-        .order('run_at', { ascending: true })
-        .limit(10);
+      while (true) {
+        const job = await queueService.claimNext(queueName);
+        if (!job) break;
 
-      if (error || !jobs?.length) continue;
-
-      for (const job of jobs) {
         try {
-          // Mark as running
-          await db.from('jobs').update({ status: 'running' }).eq('id', job.id);
-
-          // Dispatch to appropriate handler based on job_type
           const handlerUrl = getHandlerUrl(job.job_type);
           if (handlerUrl) {
-            await fetch(handlerUrl, {
+            const response = await fetch(handlerUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(job.payload_json),
             });
+
+            if (!response.ok) {
+              const responseText = await response.text().catch(() => '');
+              throw new Error(
+                `Handler ${job.job_type} failed with ${response.status}${responseText ? `: ${responseText}` : ''}`,
+              );
+            }
+          } else {
+            throw new Error(`No handler registered for job type: ${job.job_type}`);
           }
 
           await queueService.markCompleted(job.id);

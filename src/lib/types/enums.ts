@@ -103,6 +103,7 @@ export enum ConversationEventType {
   MessageSent = 'message_sent',
   MessageReceived = 'message_received',
   AIReplyGenerated = 'ai_reply_generated',
+  StopConditionReached = 'stop_condition_reached',
   QualificationChanged = 'qualification_changed',
   BookingInitiated = 'booking_initiated',
   BookingConfirmed = 'booking_confirmed',

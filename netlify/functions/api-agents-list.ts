@@ -1,6 +1,8 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { AgentService } from '../../src/lib/agents/service';
+import { CampaignService } from '../../src/lib/campaigns/service';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * List agents for a campaign.
@@ -20,6 +22,15 @@ export default async (req: Request, _context: Context) => {
     if (!campaignId) {
       return new Response(JSON.stringify({ error: 'campaign_id is required' }), { status: 400 });
     }
+
+    const campaignService = new CampaignService(db);
+    const campaign = await campaignService.getById(campaignId);
+    if (!campaign) {
+      return new Response(JSON.stringify({ error: 'Campaign not found' }), { status: 404 });
+    }
+
+    const access = await requireWorkspaceAccess(req, campaign.workspace_id);
+    if (access instanceof Response) return access;
 
     const agentService = new AgentService(db);
     const agents = await agentService.listByCampaign(campaignId);

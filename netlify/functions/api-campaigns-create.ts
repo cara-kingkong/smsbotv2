@@ -1,6 +1,7 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { CampaignService } from '../../src/lib/campaigns/service';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * Create a campaign within a workspace.
@@ -26,20 +27,12 @@ export default async (req: Request, _context: Context) => {
       );
     }
 
-    // Validate workspace exists
-    const { data: workspace, error: wsError } = await db
-      .from('workspaces')
-      .select('id')
-      .eq('id', workspace_id)
-      .single();
-
-    if (wsError || !workspace) {
-      return new Response(JSON.stringify({ error: 'Workspace not found' }), { status: 404 });
-    }
+    const access = await requireWorkspaceAccess(req, workspace_id);
+    if (access instanceof Response) return access;
 
     const campaignService = new CampaignService(db);
     const campaign = await campaignService.create({
-      workspace_id,
+      workspace_id: access.workspace.id,
       name,
       business_hours_json,
       stop_conditions_json,

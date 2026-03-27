@@ -246,6 +246,7 @@ export interface WebhookReceipt {
 
 export interface Job {
   id: string;
+  workspace_id: string | null;
   job_type: string;
   queue_name: string;
   status: JobStatus;

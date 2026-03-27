@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Conversation, Lead } from '@lib/types';
-import { ConversationStatus, ConversationOutcome, ConversationEventType, EntityStatus } from '@lib/types';
+import type { Conversation } from '@lib/types';
+import { ConversationStatus, ConversationOutcome, ConversationEventType } from '@lib/types';
 
 export interface CreateConversationInput {
   workspace_id: string;
@@ -12,6 +12,21 @@ export interface CreateConversationInput {
 
 export class ConversationService {
   constructor(private readonly db: SupabaseClient) {}
+
+  private buildStatusUpdate(status: ConversationStatus): Record<string, unknown> {
+    const now = new Date().toISOString();
+    const isTerminal = status === ConversationStatus.Completed
+      || status === ConversationStatus.OptedOut
+      || status === ConversationStatus.Failed;
+
+    return {
+      status,
+      needs_human: status === ConversationStatus.NeedsHuman,
+      human_controlled: status === ConversationStatus.HumanControlled,
+      last_activity_at: now,
+      ...(isTerminal ? { closed_at: now } : {}),
+    };
+  }
 
   async create(input: CreateConversationInput): Promise<Conversation> {
     const { data, error } = await this.db
@@ -75,13 +90,7 @@ export class ConversationService {
   async updateStatus(id: string, status: ConversationStatus): Promise<Conversation> {
     const { data, error } = await this.db
       .from('conversations')
-      .update({
-        status,
-        last_activity_at: new Date().toISOString(),
-        ...(status === ConversationStatus.Completed || status === ConversationStatus.OptedOut || status === ConversationStatus.Failed
-          ? { closed_at: new Date().toISOString() }
-          : {}),
-      })
+      .update(this.buildStatusUpdate(status))
       .eq('id', id)
       .select()
       .single();
@@ -103,36 +112,13 @@ export class ConversationService {
   }
 
   async humanTakeover(id: string): Promise<Conversation> {
-    const { data, error } = await this.db
-      .from('conversations')
-      .update({
-        human_controlled: true,
-        needs_human: false,
-        status: ConversationStatus.HumanControlled,
-        last_activity_at: new Date().toISOString(),
-      })
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw new Error(`Failed to set human takeover: ${error.message}`);
+    const data = await this.updateStatus(id, ConversationStatus.HumanControlled);
     await this.logEvent(id, ConversationEventType.HumanTakeover, {});
     return data;
   }
 
   async releaseToAI(id: string): Promise<Conversation> {
-    const { data, error } = await this.db
-      .from('conversations')
-      .update({
-        human_controlled: false,
-        status: ConversationStatus.Active,
-        last_activity_at: new Date().toISOString(),
-      })
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw new Error(`Failed to release to AI: ${error.message}`);
+    const data = await this.updateStatus(id, ConversationStatus.Active);
     await this.logEvent(id, ConversationEventType.HumanRelease, {});
     return data;
   }

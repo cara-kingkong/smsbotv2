@@ -31,6 +31,14 @@ export interface CreateAgentVersionInput {
 export class AgentService {
   constructor(private readonly db: SupabaseClient) {}
 
+  private applyDeletedFilter<T extends { is?: (column: string, value: null) => T }>(query: T): T {
+    if (typeof query.is === 'function') {
+      return query.is('deleted_at', null);
+    }
+
+    return query;
+  }
+
   async create(input: CreateAgentInput): Promise<Agent> {
     // Build insert payload — only include optional columns if they have values,
     // so the insert works whether or not the migration has run yet.
@@ -114,12 +122,14 @@ export class AgentService {
   }
 
   async listByCampaign(campaignId: string): Promise<Agent[]> {
-    const { data, error } = await this.db
+    const query = this.db
       .from('agents')
       .select('*')
       .eq('campaign_id', campaignId)
-      .is('deleted_at', null)
       .order('created_at', { ascending: true });
+
+    const filtered = this.applyDeletedFilter(query as any);
+    const { data, error } = await filtered;
 
     if (error) throw new Error(`Failed to list agents: ${error.message}`);
     return data ?? [];
@@ -128,12 +138,14 @@ export class AgentService {
   async listByWorkspace(workspaceId: string): Promise<(Agent & { campaign_name?: string })[]> {
     // Join through campaigns to filter by workspace_id (works whether or not
     // agents.workspace_id column exists yet — the FK is on campaign_id)
-    const { data, error } = await this.db
+    const query = this.db
       .from('agents')
       .select('*, campaigns!inner(name, workspace_id)')
       .eq('campaigns.workspace_id', workspaceId)
-      .is('deleted_at', null)
       .order('created_at', { ascending: false });
+
+    const filtered = this.applyDeletedFilter(query as any);
+    const { data, error } = await filtered;
 
     if (error) throw new Error(`Failed to list workspace agents: ${error.message}`);
 
@@ -149,12 +161,14 @@ export class AgentService {
 
   /** Weighted random selection among active agents in a campaign */
   async selectForConversation(campaignId: string): Promise<{ agent: Agent; version: AgentVersion }> {
-    const { data: agents, error } = await this.db
+    const query = this.db
       .from('agents')
       .select('*')
       .eq('campaign_id', campaignId)
-      .eq('status', EntityStatus.Active)
-      .is('deleted_at', null);
+      .eq('status', EntityStatus.Active);
+
+    const filtered = this.applyDeletedFilter(query as any);
+    const { data: agents, error } = await filtered;
 
     if (error) throw new Error(`Failed to list agents: ${error.message}`);
     if (!agents || agents.length === 0) throw new Error('No active agents for campaign');
@@ -185,6 +199,17 @@ export class AgentService {
       .eq('is_active', true)
       .order('version_number', { ascending: false })
       .limit(1)
+      .single();
+
+    if (error) return null;
+    return data;
+  }
+
+  async getVersionById(versionId: string): Promise<AgentVersion | null> {
+    const { data, error } = await this.db
+      .from('agent_versions')
+      .select('*')
+      .eq('id', versionId)
       .single();
 
     if (error) return null;

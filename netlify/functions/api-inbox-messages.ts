@@ -1,5 +1,7 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
+import { ConversationService } from '../../src/lib/conversations/service';
+import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * Fetch message history for a conversation.
@@ -19,6 +21,15 @@ export default async (req: Request, _context: Context) => {
     if (!conversationId) {
       return new Response(JSON.stringify({ error: 'conversation_id is required' }), { status: 400 });
     }
+
+    const conversationService = new ConversationService(db);
+    const conversation = await conversationService.getById(conversationId);
+    if (!conversation) {
+      return new Response(JSON.stringify({ error: 'Conversation not found' }), { status: 404 });
+    }
+
+    const access = await requireWorkspaceAccess(req, conversation.workspace_id);
+    if (access instanceof Response) return access;
 
     const { data, error } = await db
       .from('messages')

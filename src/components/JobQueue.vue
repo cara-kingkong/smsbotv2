@@ -17,7 +17,7 @@
           class="ml-1.5 text-[11px] px-1.5 py-0.5 rounded-full"
           :class="badgeBgClass(tab.key)"
         >
-          {{ statusCounts[tab.key] ?? 0 }}
+          {{ filterCount(tab.key) }}
         </span>
       </button>
     </div>
@@ -123,17 +123,18 @@ interface JobRecord {
   last_error: string | null;
   dead_lettered_at: string | null;
   created_at: string;
-  updated_at: string;
 }
 
-type StatusKey = 'queued' | 'processing' | 'completed' | 'failed' | 'dead_lettered';
+type StatusKey = 'pending' | 'running' | 'completed' | 'failed' | 'dead_lettered';
+type FilterKey = 'all' | StatusKey;
 
-const statusList: StatusKey[] = ['queued', 'processing', 'completed', 'failed', 'dead_lettered'];
+const statusList: StatusKey[] = ['pending', 'running', 'completed', 'failed', 'dead_lettered'];
 
 const tabs = [
   { key: 'all', label: 'All' },
-  { key: 'queued', label: 'Queued' },
-  { key: 'processing', label: 'Processing' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'running', label: 'Running' },
+  { key: 'completed', label: 'Completed' },
   { key: 'failed', label: 'Failed' },
   { key: 'dead_lettered', label: 'Dead Letter' },
 ] as const;
@@ -141,10 +142,10 @@ const tabs = [
 const jobs = ref<JobRecord[]>([]);
 const loading = ref(true);
 const errorMsg = ref('');
-const activeFilter = ref<string>('all');
+const activeFilter = ref<FilterKey>('all');
 const retryingId = ref<string | null>(null);
+const workspaceId = ref<string | null>(null);
 
-let workspaceId: string | null = null;
 let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
 const filteredJobs = computed(() => {
@@ -153,20 +154,29 @@ const filteredJobs = computed(() => {
 });
 
 const statusCounts = computed(() => {
-  const counts: Record<string, number> = {};
-  for (const s of statusList) counts[s] = 0;
+  const counts: Record<StatusKey, number> = {
+    pending: 0,
+    running: 0,
+    completed: 0,
+    failed: 0,
+    dead_lettered: 0,
+  };
   for (const job of jobs.value) {
-    if (counts[job.status] !== undefined) {
-      counts[job.status]++;
+    if (job.status in counts) {
+      counts[job.status as StatusKey]++;
     }
   }
   return counts;
 });
 
+function filterCount(key: FilterKey): number {
+  return key === 'all' ? jobs.value.length : statusCounts.value[key];
+}
+
 function statusBadgeClass(status: string): string {
   switch (status) {
-    case 'queued': return 'bg-slate-500/15 text-slate-400';
-    case 'processing': return 'bg-blue-500/15 text-blue-400';
+    case 'pending': return 'bg-slate-500/15 text-slate-400';
+    case 'running': return 'bg-blue-500/15 text-blue-400';
     case 'completed': return 'bg-green-500/15 text-green-400';
     case 'failed': return 'bg-red-500/15 text-red-400';
     case 'dead_lettered': return 'bg-amber-500/15 text-amber-400';
@@ -176,8 +186,9 @@ function statusBadgeClass(status: string): string {
 
 function badgeBgClass(status: string): string {
   switch (status) {
-    case 'queued': return 'bg-slate-500/20 text-slate-400';
-    case 'processing': return 'bg-blue-500/20 text-blue-400';
+    case 'pending': return 'bg-slate-500/20 text-slate-400';
+    case 'running': return 'bg-blue-500/20 text-blue-400';
+    case 'completed': return 'bg-green-500/20 text-green-400';
     case 'failed': return 'bg-red-500/20 text-red-400';
     case 'dead_lettered': return 'bg-amber-500/20 text-amber-400';
     default: return 'bg-slate-500/20 text-slate-400';
@@ -186,8 +197,8 @@ function badgeBgClass(status: string): string {
 
 function badgeTextClass(status: string): string {
   switch (status) {
-    case 'queued': return 'text-slate-300';
-    case 'processing': return 'text-blue-400';
+    case 'pending': return 'text-slate-300';
+    case 'running': return 'text-blue-400';
     case 'completed': return 'text-green-400';
     case 'failed': return 'text-red-400';
     case 'dead_lettered': return 'text-amber-400';
@@ -224,17 +235,20 @@ function formatDate(iso: string | null): string {
   });
 }
 
-function resolveWorkspace(): string | null {
-  const { workspaceId } = getSessionContext();
-  return workspaceId || null;
-}
-
 async function fetchJobs() {
-  if (!workspaceId) return;
+  if (!workspaceId.value) {
+    errorMsg.value = 'Workspace context is unavailable.';
+    jobs.value = [];
+    return;
+  }
+
   errorMsg.value = '';
 
   try {
-    const params = new URLSearchParams({ workspace_id: workspaceId });
+    const params = new URLSearchParams({
+      workspace_id: workspaceId.value,
+      limit: '100',
+    });
     const res = await fetch(`${API_BASE}/api-jobs-list?${params}`);
 
     if (!res.ok) {
@@ -275,11 +289,13 @@ async function retryJob(jobId: string) {
 }
 
 onMounted(async () => {
-  workspaceId = resolveWorkspace();
-  if (!workspaceId) {
+  workspaceId.value = getSessionContext().workspaceId || null;
+  if (!workspaceId.value) {
     loading.value = false;
+    errorMsg.value = 'Workspace context is unavailable.';
     return;
   }
+
   await fetchJobs();
   loading.value = false;
 

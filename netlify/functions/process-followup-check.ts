@@ -22,6 +22,7 @@ export default async (_req: Request, _context: Context) => {
       .select(`
         id,
         agent_id,
+        workspace_id,
         last_activity_at
       `)
       .eq('status', 'waiting_for_lead')
@@ -88,6 +89,7 @@ export default async (_req: Request, _context: Context) => {
       const { data: existingJobs } = await db
         .from('jobs')
         .select('id')
+        .eq('workspace_id', conv.workspace_id)
         .eq('job_type', 'generate_ai_reply')
         .in('status', [JobStatus.Pending, JobStatus.Running])
         .contains('payload_json', { conversation_id: conv.id })
@@ -99,6 +101,7 @@ export default async (_req: Request, _context: Context) => {
 
       // Schedule the follow-up
       await queueService.enqueue({
+        workspace_id: conv.workspace_id,
         job_type: 'generate_ai_reply',
         queue_name: 'ai',
         payload: { conversation_id: conv.id, trigger: 'followup_scheduled' },

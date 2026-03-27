@@ -1,4 +1,4 @@
-import type { AIDecision, Message, Conversation, Lead } from './domain';
+import type { AIDecision, Message, Lead } from './domain';
 
 // ─── SMS Adapter ─────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ export interface InboundMessagePayload {
 export interface SMSAdapter {
   sendMessage(input: SendMessageInput): Promise<SendMessageResult>;
   parseInboundWebhook(body: Record<string, unknown>): InboundMessagePayload;
-  validateWebhookSignature(headers: Record<string, string>, body: string): boolean;
+  validateWebhookSignature(requestUrl: string, headers: Headers, body: Record<string, string>): boolean;
   getDeliveryStatus(provider_message_id: string): Promise<string>;
 }
 

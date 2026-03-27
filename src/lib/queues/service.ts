@@ -3,6 +3,7 @@ import type { Job } from '@lib/types';
 import { JobStatus } from '@lib/types';
 
 export interface EnqueueInput {
+  workspace_id: string;
   job_type: string;
   queue_name?: string;
   payload: Record<string, unknown>;
@@ -21,6 +22,7 @@ export class QueueService {
     const { data, error } = await this.db
       .from('jobs')
       .insert({
+        workspace_id: input.workspace_id,
         job_type: input.job_type,
         queue_name: input.queue_name ?? 'default',
         status: JobStatus.Pending,
@@ -42,7 +44,15 @@ export class QueueService {
     });
 
     if (error || !data) return null;
-    return data;
+
+    const claimed = data as Job;
+    if (claimed.status === JobStatus.Running) return claimed;
+
+    return {
+      ...claimed,
+      status: JobStatus.Running,
+      attempts: (claimed.attempts ?? 0) + 1,
+    };
   }
 
   async markCompleted(jobId: string): Promise<void> {
@@ -61,14 +71,14 @@ export class QueueService {
 
     if (!job) return;
 
-    const newAttempts = (job.attempts ?? 0) + 1;
-    const shouldDeadLetter = newAttempts >= (job.max_attempts ?? 3);
+    const attempts = job.attempts ?? 0;
+    const maxAttempts = job.max_attempts ?? 3;
+    const shouldDeadLetter = attempts >= maxAttempts;
 
     await this.db
       .from('jobs')
       .update({
         status: shouldDeadLetter ? JobStatus.DeadLettered : JobStatus.Failed,
-        attempts: newAttempts,
         last_error: errorMessage,
         ...(shouldDeadLetter ? { dead_lettered_at: new Date().toISOString() } : {}),
       })

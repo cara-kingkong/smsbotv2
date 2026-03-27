@@ -18,7 +18,8 @@ begin
   if claimed_job.id is not null then
     update jobs
     set status = 'running', attempts = attempts + 1
-    where id = claimed_job.id;
+    where id = claimed_job.id
+    returning * into claimed_job;
   end if;
 
   return claimed_job;

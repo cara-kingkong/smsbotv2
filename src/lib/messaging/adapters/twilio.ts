@@ -40,11 +40,10 @@ export class TwilioAdapter implements SMSAdapter {
     };
   }
 
-  validateWebhookSignature(headers: Record<string, string>, body: string): boolean {
+  validateWebhookSignature(requestUrl: string, headers: Headers, body: Record<string, string>): boolean {
     const { validateRequest } = Twilio;
-    const signature = headers['x-twilio-signature'] || '';
-    const url = `${process.env.PUBLIC_SITE_URL}/.netlify/functions/webhook-twilio-inbound`;
-    return validateRequest(this.authToken, signature, url, JSON.parse(body));
+    const signature = headers.get('x-twilio-signature') || '';
+    return validateRequest(this.authToken, signature, requestUrl, body);
   }
 
   async getDeliveryStatus(providerMessageId: string): Promise<string> {
