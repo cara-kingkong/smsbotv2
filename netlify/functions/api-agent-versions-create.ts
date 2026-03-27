@@ -17,7 +17,7 @@ export default async (req: Request, _context: Context) => {
 
   try {
     const body = await req.json();
-    const { agent_id, prompt_text, system_rules_json, reply_cadence_json, config_json } = body;
+    const { agent_id, prompt_text, system_rules_json, reply_cadence_json, allowed_actions_json, qualification_rules_json, config_json } = body;
 
     if (!agent_id || !prompt_text) {
       return new Response(
@@ -43,6 +43,8 @@ export default async (req: Request, _context: Context) => {
       prompt_text,
       system_rules_json,
       reply_cadence_json,
+      allowed_actions_json,
+      qualification_rules_json,
       config_json,
     });
 

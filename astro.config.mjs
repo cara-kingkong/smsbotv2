@@ -7,6 +7,7 @@ export default defineConfig({
   output: 'server',
   adapter: netlify(),
   integrations: [vue()],
+  server: { host: true },
   vite: {
     plugins: [tailwindcss()],
     resolve: {

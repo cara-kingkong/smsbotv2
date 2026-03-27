@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-4">
+  <div class="w-full space-y-4">
     <!-- Status filter tabs -->
     <div class="flex border-b border-slate-700">
       <button

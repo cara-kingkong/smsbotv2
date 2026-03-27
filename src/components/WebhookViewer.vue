@@ -1,5 +1,5 @@
 <template>
-  <div class="bg-surface border border-slate-700 rounded-lg overflow-hidden flex flex-col" style="height: calc(100vh - 220px); min-height: 400px;">
+  <div class="panel w-full overflow-hidden p-0 flex flex-col" style="height: calc(100vh - 220px); min-height: 400px;">
     <!-- Filter tabs -->
     <div class="flex border-b border-slate-700 shrink-0">
       <button

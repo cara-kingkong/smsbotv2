@@ -16,7 +16,7 @@ export default async (req: Request, _context: Context) => {
 
   try {
     const body = await req.json();
-    const { agent_id, name, weight, status } = body;
+    const { agent_id, name, description, weight, status } = body;
 
     if (!agent_id) {
       return new Response(
@@ -28,12 +28,13 @@ export default async (req: Request, _context: Context) => {
     // Build update payload with only provided fields
     const updates: Record<string, unknown> = {};
     if (name !== undefined) updates.name = name;
+    if (description !== undefined) updates.description = description;
     if (weight !== undefined) updates.weight = weight;
     if (status !== undefined) updates.status = status;
 
     if (Object.keys(updates).length === 0) {
       return new Response(
-        JSON.stringify({ error: 'No fields to update. Provide at least one of: name, weight, status' }),
+        JSON.stringify({ error: 'No fields to update. Provide at least one of: name, description, weight, status' }),
         { status: 400 },
       );
     }

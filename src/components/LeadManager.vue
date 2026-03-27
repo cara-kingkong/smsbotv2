@@ -1,229 +1,221 @@
 <template>
-  <div class="flex gap-4" style="height: calc(100vh - 220px); min-height: 400px;">
-    <!-- Left: Lead list -->
-    <div class="w-[400px] shrink-0 bg-surface border border-slate-700 rounded-lg overflow-hidden flex flex-col">
-      <!-- Search -->
-      <div class="p-3 border-b border-slate-700">
+  <div class="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]" style="height: calc(100vh - 220px); min-height: 520px;">
+    <aside class="panel flex min-h-0 flex-col overflow-hidden p-0">
+      <div class="border-b px-5 py-5" style="border-color: rgba(17,17,17,0.06);">
+        <div class="page-kicker">Lead Directory</div>
+        <h2 class="section-title mt-3">Recent leads</h2>
+        <p class="section-copy mt-2">Search, review, and open a lead to start a conversation.</p>
+      </div>
+
+      <div class="border-b px-4 py-4" style="border-color: rgba(17,17,17,0.06);">
         <input
           v-model="searchQuery"
           type="text"
           placeholder="Search leads..."
-          class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+          class="input"
           @input="debouncedSearch"
         />
       </div>
 
-      <!-- List -->
-      <div class="flex-1 overflow-y-auto">
-        <div v-if="listLoading" class="flex items-center justify-center h-full text-slate-400 text-sm">
-          Loading...
-        </div>
-        <div v-else-if="leads.length === 0" class="flex items-center justify-center h-full text-slate-400 text-sm p-6 text-center">
+      <div class="flex-1 overflow-y-auto px-3 py-3">
+        <div v-if="listLoading" class="empty-state min-h-full">Loading leads...</div>
+        <div v-else-if="leads.length === 0" class="empty-state min-h-full">
           No leads found. Add your first lead using the form.
         </div>
-        <div
-          v-for="lead in leads"
-          :key="lead.id"
-          class="flex flex-col gap-0.5 px-4 py-3 border-b border-slate-700 cursor-pointer transition-colors hover:bg-surface-hover"
-          :class="{ 'bg-surface-hover border-l-[3px] border-l-blue-500': selectedLead?.id === lead.id }"
-          @click="selectedLead = lead"
-        >
-          <div class="flex justify-between items-center">
-            <span class="font-semibold text-sm text-slate-100">{{ lead.first_name }} {{ lead.last_name }}</span>
-            <span class="text-[11px] text-slate-400">{{ relativeTime(lead.created_at) }}</span>
-          </div>
-          <div class="text-[13px] text-slate-400">{{ lead.phone_e164 }}</div>
-          <div v-if="lead.email" class="text-[12px] text-slate-500">{{ lead.email }}</div>
+        <div v-else class="space-y-2">
+          <button
+            v-for="lead in leads"
+            :key="lead.id"
+            type="button"
+            class="list-card text-left"
+            :class="selectedLead?.id === lead.id ? 'list-card-active' : ''"
+            @click="selectedLead = lead; activeTab = 'detail'"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0 flex-1">
+                <div class="text-sm font-semibold text-slate-900 truncate">{{ lead.first_name }} {{ lead.last_name }}</div>
+                <div class="mt-1 text-xs text-slate-500">{{ lead.phone_e164 }}</div>
+                <div v-if="lead.email" class="mt-1 truncate text-xs text-slate-400">{{ lead.email }}</div>
+              </div>
+              <span class="shrink-0 text-[11px] text-slate-400">{{ relativeTime(lead.created_at) }}</span>
+            </div>
+          </button>
         </div>
       </div>
-    </div>
+    </aside>
 
-    <!-- Right: Add/Detail panel -->
-    <div class="flex-1 bg-surface border border-slate-700 rounded-lg overflow-hidden flex flex-col">
-      <!-- Tab bar -->
-      <div class="flex border-b border-slate-700 shrink-0">
-        <button
-          class="flex-1 px-4 py-3 text-sm font-medium transition-colors"
-          :class="activeTab === 'add' ? 'text-blue-400 border-b-2 border-blue-500 bg-surface-hover' : 'text-slate-400 hover:text-slate-200'"
-          @click="activeTab = 'add'"
-        >
-          Add Lead
-        </button>
-        <button
-          class="flex-1 px-4 py-3 text-sm font-medium transition-colors"
-          :class="activeTab === 'detail' ? 'text-blue-400 border-b-2 border-blue-500 bg-surface-hover' : 'text-slate-400 hover:text-slate-200'"
-          :disabled="!selectedLead"
-          @click="activeTab = 'detail'"
-        >
-          Lead Detail
-        </button>
+    <section class="panel flex min-h-0 flex-col overflow-hidden p-0">
+      <div class="border-b px-5 py-4" style="border-color: rgba(17,17,17,0.06);">
+        <div class="flex flex-wrap gap-2">
+          <button
+            class="pill-tab"
+            :class="activeTab === 'add' ? 'pill-tab-active' : ''"
+            @click="activeTab = 'add'"
+          >
+            Add Lead
+          </button>
+          <button
+            class="pill-tab"
+            :class="activeTab === 'detail' ? 'pill-tab-active' : ''"
+            :disabled="!selectedLead"
+            @click="activeTab = 'detail'"
+          >
+            Lead Detail
+          </button>
+        </div>
       </div>
 
-      <!-- Add Lead Form -->
-      <div v-if="activeTab === 'add'" class="flex-1 overflow-y-auto p-6">
-        <form @submit.prevent="createLead" class="max-w-md space-y-4">
+      <div v-if="activeTab === 'add'" class="flex-1 overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
+        <form @submit.prevent="createLead" class="w-full space-y-5">
           <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Phone Number *</label>
+            <label class="form-label">Phone Number *</label>
             <input
               v-model="form.phone"
               type="tel"
               required
               placeholder="+1 (555) 123-4567"
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+              class="input"
             />
-            <p class="text-[12px] text-slate-500 mt-1">US numbers can omit country code</p>
+            <p class="form-help">US numbers can omit the country code.</p>
           </div>
 
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid gap-4 sm:grid-cols-2">
             <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">First Name *</label>
+              <label class="form-label">First Name *</label>
               <input
                 v-model="form.first_name"
                 type="text"
                 required
                 placeholder="Jane"
-                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+                class="input"
               />
             </div>
             <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Last Name</label>
+              <label class="form-label">Last Name</label>
               <input
                 v-model="form.last_name"
                 type="text"
                 placeholder="Doe"
-                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+                class="input"
               />
             </div>
           </div>
 
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Email</label>
-            <input
-              v-model="form.email"
-              type="email"
-              placeholder="jane@example.com"
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-            />
-          </div>
-
-          <div class="relative" ref="timezoneContainerRef">
-            <label class="block text-sm font-medium text-slate-300 mb-1">Timezone</label>
-            <input
-              v-model="timezoneSearch"
-              type="text"
-              placeholder="Search timezones..."
-              autocomplete="off"
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-              @focus="showTimezoneDropdown = true"
-              @input="onTimezoneInput"
-            />
-            <div v-if="form.timezone && !showTimezoneDropdown" class="text-[12px] text-slate-400 mt-1">
-              Selected: {{ form.timezone }}
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label class="form-label">Email</label>
+              <input
+                v-model="form.email"
+                type="email"
+                placeholder="jane@example.com"
+                class="input"
+              />
             </div>
-            <div
-              v-if="showTimezoneDropdown && filteredTimezones.length > 0"
-              class="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto bg-slate-900 border border-slate-700 rounded-lg shadow-lg"
-            >
+
+            <div class="relative" ref="timezoneContainerRef">
+              <label class="form-label">Timezone</label>
+              <input
+                v-model="timezoneSearch"
+                type="text"
+                placeholder="Search timezones..."
+                autocomplete="off"
+                class="input"
+                @focus="showTimezoneDropdown = true"
+                @input="onTimezoneInput"
+              />
+              <div v-if="form.timezone && !showTimezoneDropdown" class="form-help mt-2">
+                Selected: {{ form.timezone }}
+              </div>
               <div
-                v-for="tz in filteredTimezones"
-                :key="tz"
-                class="px-3 py-2 text-sm text-slate-200 cursor-pointer hover:bg-slate-700 transition-colors"
-                :class="{ 'bg-slate-800 text-blue-400': form.timezone === tz }"
-                @mousedown.prevent="selectTimezone(tz)"
+                v-if="showTimezoneDropdown && filteredTimezones.length > 0"
+                class="absolute z-50 mt-2 max-h-56 w-full overflow-y-auto rounded-2xl border bg-white shadow-lg"
+                style="border-color: rgba(17,17,17,0.08);"
               >
-                {{ tz }}
+                <button
+                  v-for="tz in filteredTimezones"
+                  :key="tz"
+                  type="button"
+                  class="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                  :class="form.timezone === tz ? 'bg-slate-50 text-slate-900' : ''"
+                  @mousedown.prevent="selectTimezone(tz)"
+                >
+                  {{ tz }}
+                </button>
               </div>
             </div>
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">External Contact ID</label>
+            <label class="form-label">External Contact ID</label>
             <input
               v-model="form.external_contact_id"
               type="text"
               placeholder="CRM contact ID (optional)"
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+              class="input"
             />
           </div>
 
-          <!-- Success/Error messages -->
-          <div v-if="formSuccess" class="bg-green-500/10 border border-green-500/30 text-green-400 text-sm px-4 py-3 rounded-lg">
-            {{ formSuccess }}
-          </div>
-          <div v-if="formError" class="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
-            {{ formError }}
-          </div>
+          <div v-if="formSuccess" class="feedback-success">{{ formSuccess }}</div>
+          <div v-if="formError" class="feedback-error">{{ formError }}</div>
 
-          <button
-            type="submit"
-            :disabled="formLoading"
-            class="w-full py-2.5 rounded-lg text-sm font-medium bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 transition-colors"
-          >
+          <button type="submit" :disabled="formLoading" class="button-primary">
             {{ formLoading ? 'Creating...' : 'Add Lead' }}
           </button>
         </form>
       </div>
 
-      <!-- Lead Detail -->
-      <div v-else-if="activeTab === 'detail'" class="flex-1 overflow-y-auto p-6">
-        <div v-if="!selectedLead" class="flex items-center justify-center h-full text-slate-400 text-sm">
-          Select a lead from the list to view details
-        </div>
-        <div v-else class="max-w-md space-y-4">
-          <div class="flex items-center gap-3 mb-6">
-            <div class="w-12 h-12 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-lg">
+      <div v-else class="flex-1 overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
+        <div v-if="!selectedLead" class="empty-state min-h-full">Select a lead from the list to view details.</div>
+        <div v-else class="w-full space-y-6">
+          <div class="flex items-center gap-4">
+            <div class="flex h-14 w-14 items-center justify-center rounded-[20px] bg-teal-100 text-lg font-bold text-teal-700">
               {{ selectedLead.first_name[0] }}{{ (selectedLead.last_name || '')[0] || '' }}
             </div>
             <div>
-              <div class="text-lg font-semibold">{{ selectedLead.first_name }} {{ selectedLead.last_name }}</div>
-              <div class="text-sm text-slate-400">{{ selectedLead.phone_e164 }}</div>
+              <div class="text-lg font-semibold text-slate-900">{{ selectedLead.first_name }} {{ selectedLead.last_name }}</div>
+              <div class="mt-1 text-sm text-slate-500">{{ selectedLead.phone_e164 }}</div>
             </div>
           </div>
 
-          <div class="space-y-3">
-            <div class="flex justify-between py-2 border-b border-slate-700">
-              <span class="text-sm text-slate-400">Email</span>
-              <span class="text-sm text-slate-200">{{ selectedLead.email || 'Not provided' }}</span>
+          <div class="grid gap-3">
+            <div class="flex items-center justify-between rounded-2xl border px-4 py-3" style="border-color: rgba(17,17,17,0.06);">
+              <span class="text-sm text-slate-500">Email</span>
+              <span class="text-sm font-medium text-slate-900">{{ selectedLead.email || 'Not provided' }}</span>
             </div>
-            <div class="flex justify-between py-2 border-b border-slate-700">
-              <span class="text-sm text-slate-400">Timezone</span>
-              <span class="text-sm text-slate-200">{{ selectedLead.timezone || 'Not set' }}</span>
+            <div class="flex items-center justify-between rounded-2xl border px-4 py-3" style="border-color: rgba(17,17,17,0.06);">
+              <span class="text-sm text-slate-500">Timezone</span>
+              <span class="text-sm font-medium text-slate-900">{{ selectedLead.timezone || 'Not set' }}</span>
             </div>
-            <div class="flex justify-between py-2 border-b border-slate-700">
-              <span class="text-sm text-slate-400">External ID</span>
-              <span class="text-sm text-slate-200">{{ selectedLead.external_contact_id || 'None' }}</span>
+            <div class="flex items-center justify-between rounded-2xl border px-4 py-3" style="border-color: rgba(17,17,17,0.06);">
+              <span class="text-sm text-slate-500">External ID</span>
+              <span class="text-sm font-medium text-slate-900">{{ selectedLead.external_contact_id || 'None' }}</span>
             </div>
-            <div class="flex justify-between py-2 border-b border-slate-700">
-              <span class="text-sm text-slate-400">Status</span>
-              <span class="text-[12px] px-2 py-0.5 rounded-full font-medium bg-green-500/15 text-green-400">{{ selectedLead.status }}</span>
+            <div class="flex items-center justify-between rounded-2xl border px-4 py-3" style="border-color: rgba(17,17,17,0.06);">
+              <span class="text-sm text-slate-500">Status</span>
+              <span class="badge bg-emerald-50 text-emerald-700">{{ selectedLead.status }}</span>
             </div>
-            <div class="flex justify-between py-2 border-b border-slate-700">
-              <span class="text-sm text-slate-400">Opted Out</span>
-              <span class="text-sm" :class="selectedLead.opted_out ? 'text-red-400' : 'text-green-400'">{{ selectedLead.opted_out ? 'Yes' : 'No' }}</span>
+            <div class="flex items-center justify-between rounded-2xl border px-4 py-3" style="border-color: rgba(17,17,17,0.06);">
+              <span class="text-sm text-slate-500">Opted Out</span>
+              <span class="text-sm font-medium" :class="selectedLead.opted_out ? 'text-red-600' : 'text-emerald-700'">{{ selectedLead.opted_out ? 'Yes' : 'No' }}</span>
             </div>
-            <div class="flex justify-between py-2 border-b border-slate-700">
-              <span class="text-sm text-slate-400">Created</span>
-              <span class="text-sm text-slate-200">{{ formatDate(selectedLead.created_at) }}</span>
+            <div class="flex items-center justify-between rounded-2xl border px-4 py-3" style="border-color: rgba(17,17,17,0.06);">
+              <span class="text-sm text-slate-500">Created</span>
+              <span class="text-sm font-medium text-slate-900">{{ formatDate(selectedLead.created_at) }}</span>
             </div>
           </div>
 
-          <!-- Start conversation button -->
           <button
-            class="w-full mt-4 py-2.5 rounded-lg text-sm font-medium bg-green-500 text-slate-900 hover:bg-green-400 disabled:opacity-50 transition-colors"
+            class="button-primary"
             :disabled="startConvLoading"
             @click="startConversation"
           >
             {{ startConvLoading ? 'Starting...' : 'Start Conversation' }}
           </button>
-          <div v-if="startConvError" class="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
-            {{ startConvError }}
-          </div>
-          <div v-if="startConvSuccess" class="bg-green-500/10 border border-green-500/30 text-green-400 text-sm px-4 py-3 rounded-lg">
-            {{ startConvSuccess }}
-          </div>
+          <div v-if="startConvError" class="feedback-error">{{ startConvError }}</div>
+          <div v-if="startConvSuccess" class="feedback-success">{{ startConvSuccess }}</div>
         </div>
       </div>
-    </div>
+    </section>
   </div>
 </template>
 

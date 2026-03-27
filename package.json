@@ -35,6 +35,7 @@
   },
   "devDependencies": {
     "@netlify/functions": "^5.1.5",
+    "@playwright/test": "^1.58.2",
     "@types/node": "^25.5.0",
     "eslint": "^10.1.0",
     "tsx": "^4.21.0",

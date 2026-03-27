@@ -1,0 +1,10 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import AgentDetail from '@components/AgentDetail.vue';
+
+const { id } = Astro.params;
+---
+
+<BaseLayout title="Agent Detail">
+  <AgentDetail client:load agentId={id!} />
+</BaseLayout>

@@ -73,6 +73,125 @@
 }
 
 @layer components {
+  /* ═══ Hybrid layout: top bar + sidebar + main ═══ */
+  .app-layout {
+    @apply min-h-screen flex flex-col;
+  }
+
+  .topbar {
+    @apply sticky top-0 z-50 border-b;
+    border-color: rgba(17, 17, 17, 0.08);
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(16px);
+  }
+
+  .topbar-inner {
+    @apply flex h-14 items-center justify-between gap-4 px-4 sm:px-5;
+  }
+
+  .topbar-brand {
+    @apply flex items-center gap-2.5 shrink-0;
+  }
+
+  .topbar-brand-mark {
+    @apply inline-flex h-8 w-8 items-center justify-center rounded-xl text-xs font-semibold;
+    background: #111111;
+    color: white;
+  }
+
+  .topbar-brand-label {
+    font-family: var(--font-display);
+    @apply text-sm font-semibold tracking-tight;
+    color: var(--text-strong);
+  }
+
+  .topbar-right {
+    @apply flex items-center gap-3;
+  }
+
+  .topbar-link {
+    @apply rounded-xl px-3 py-1.5 text-[13px] font-medium transition duration-200;
+    color: var(--text);
+  }
+
+  .topbar-link:hover {
+    color: var(--text-strong);
+    background: rgba(17, 17, 17, 0.04);
+  }
+
+  .topbar-link-active {
+    color: var(--text-strong);
+    background: rgba(17, 17, 17, 0.06);
+  }
+
+  .topbar-link-signout {
+    @apply text-xs font-semibold uppercase tracking-[0.12em];
+    color: var(--text-muted);
+  }
+
+  .topbar-link-signout:hover {
+    color: var(--text-strong);
+    background: transparent;
+  }
+
+  .topbar-divider {
+    @apply h-5 w-px;
+    background: rgba(17, 17, 17, 0.1);
+  }
+
+  .topbar-user {
+    @apply flex items-center gap-2.5;
+  }
+
+  .topbar-user-avatar {
+    @apply flex h-8 w-8 items-center justify-center rounded-xl border text-xs font-bold;
+    border-color: rgba(17, 17, 17, 0.06);
+    background: #f4f4f1;
+    color: var(--text-strong);
+  }
+
+  .topbar-user-info {
+    @apply hidden min-w-0 sm:block;
+  }
+
+  .topbar-user-name {
+    @apply truncate text-[13px] font-semibold leading-tight;
+    color: var(--text-strong);
+  }
+
+  .topbar-user-workspace {
+    @apply truncate text-[11px] leading-tight;
+    color: var(--text-muted);
+  }
+
+  .app-body {
+    @apply flex-1 flex justify-center px-4 py-4 sm:px-5 lg:px-6;
+  }
+
+  .app-card {
+    @apply flex w-full max-w-[1420px] min-h-0 overflow-hidden rounded-[28px] border;
+    border-color: rgba(255, 255, 255, 0.75);
+    background: rgba(255, 255, 255, 0.76);
+    box-shadow: 0 22px 72px rgba(17, 17, 17, 0.06);
+    backdrop-filter: blur(20px);
+  }
+
+  .app-sidebar-slim {
+    @apply hidden lg:block lg:w-[200px] lg:shrink-0 lg:border-r;
+    border-color: rgba(17, 17, 17, 0.08);
+    background: rgba(251, 251, 249, 0.92);
+    border-radius: 28px 0 0 28px;
+  }
+
+  .nav-group-slim {
+    @apply mt-3;
+  }
+
+  .nav-group-slim:first-child {
+    @apply mt-0;
+  }
+
+  /* Legacy shell — kept for reference / other layouts */
   .app-shell {
     @apply min-h-screen lg:mx-auto lg:my-4 lg:grid lg:max-w-[1420px] lg:grid-cols-[260px_minmax(0,1fr)] lg:overflow-hidden lg:rounded-[28px] lg:border;
     border-color: rgba(255, 255, 255, 0.75);
@@ -229,7 +348,7 @@
   }
 
   .app-main {
-    @apply relative min-w-0;
+    @apply relative min-w-0 flex-1;
   }
 
   .app-main::before {
@@ -305,6 +424,36 @@
     border-color: rgba(17, 17, 17, 0.08);
     background: #fafaf8;
     color: var(--text);
+  }
+
+  .inline-edit-trigger {
+    @apply inline-flex max-w-full items-center gap-2 rounded-2xl text-left transition duration-200;
+  }
+
+  .inline-edit-trigger:hover .inline-edit-icon,
+  .inline-edit-trigger:focus-visible .inline-edit-icon {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .inline-edit-icon {
+    @apply h-4 w-4 shrink-0;
+    color: var(--text-muted);
+    opacity: 0;
+    transform: translateY(1px);
+    transition: opacity 160ms ease, transform 160ms ease;
+  }
+
+  .inline-edit-field {
+    @apply w-full rounded-2xl border px-4 py-3 text-sm outline-none transition duration-200;
+    border-color: rgba(17, 17, 17, 0.08);
+    background: rgba(255, 255, 255, 0.96);
+    color: var(--text-strong);
+  }
+
+  .inline-edit-field:focus {
+    border-color: rgba(17, 17, 17, 0.14);
+    box-shadow: 0 0 0 4px rgba(17, 17, 17, 0.04);
   }
 
   .panel {
@@ -517,6 +666,20 @@
 
   .data-table tbody tr:hover {
     background: rgba(17, 17, 17, 0.03);
+  }
+
+  /* ═══ Modal ═══ */
+  .modal-overlay {
+    @apply fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 py-12;
+    background: rgba(17, 17, 17, 0.3);
+    backdrop-filter: blur(4px);
+  }
+
+  .modal-panel {
+    @apply relative w-full max-w-2xl rounded-[20px] border;
+    border-color: rgba(17, 17, 17, 0.08);
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 30px 80px rgba(17, 17, 17, 0.12);
   }
 
   .empty-state {

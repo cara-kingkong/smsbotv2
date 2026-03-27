@@ -31,17 +31,18 @@ export async function getSession(Astro: AstroGlobal): Promise<AuthSession | null
       if (refreshError || !refreshData.session) return null;
 
       // Update cookies with new tokens
+      const isSecure = Astro.url.protocol === 'https:';
       Astro.cookies.set('sb-access-token', refreshData.session.access_token, {
         path: '/',
         httpOnly: true,
-        secure: true,
+        secure: isSecure,
         sameSite: 'lax',
         maxAge: 60 * 60, // 1 hour
       });
       Astro.cookies.set('sb-refresh-token', refreshData.session.refresh_token, {
         path: '/',
         httpOnly: true,
-        secure: true,
+        secure: isSecure,
         sameSite: 'lax',
         maxAge: 60 * 60 * 24 * 7, // 7 days
       });

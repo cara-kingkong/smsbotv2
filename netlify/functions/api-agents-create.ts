@@ -17,7 +17,7 @@ export default async (req: Request, _context: Context) => {
 
   try {
     const body = await req.json();
-    const { campaign_id, name, weight, ai_provider_integration_id } = body;
+    const { campaign_id, name, description, weight, ai_provider_integration_id } = body;
 
     if (!campaign_id || !name) {
       return new Response(
@@ -41,6 +41,7 @@ export default async (req: Request, _context: Context) => {
     const agent = await agentService.create({
       campaign_id,
       name,
+      description,
       weight,
       ai_provider_integration_id,
     });

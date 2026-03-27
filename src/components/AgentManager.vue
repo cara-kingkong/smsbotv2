@@ -1,151 +1,364 @@
 <template>
-  <div class="flex gap-4" style="height: calc(100vh - 220px); min-height: 400px;">
+  <div
+    class="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]"
+    style="min-height: calc(100vh - 280px);"
+  >
     <!-- Left: Agent list -->
-    <div class="w-[360px] shrink-0 bg-surface border border-slate-700 rounded-lg overflow-hidden flex flex-col">
-      <!-- Header with Add button -->
-      <div class="p-3 border-b border-slate-700 flex items-center justify-between">
-        <span class="text-sm font-medium text-slate-300">Agents</span>
+    <aside class="panel flex min-h-[560px] flex-col overflow-hidden p-0">
+      <div class="border-b border-slate-200/80 px-5 py-5">
+        <div class="page-kicker">Agent Builder</div>
+        <h2 class="section-title mt-3">Campaign agents</h2>
+        <p class="section-copy mt-2">
+          Add, configure, and A/B split test AI agents within this campaign.
+        </p>
+      </div>
+
+      <div class="flex-1 overflow-y-auto px-3 py-3">
+        <div v-if="listLoading" class="empty-state min-h-full">Loading agents...</div>
+        <div v-else-if="agents.length === 0" class="empty-state min-h-full">
+          No agents yet. Create your first agent to begin split testing.
+        </div>
+        <div v-else class="space-y-2">
+          <button
+            v-for="agent in agents"
+            :key="agent.id"
+            class="list-card"
+            :class="selectedAgent?.id === agent.id ? 'list-card-active' : ''"
+            @click="selectAgent(agent)"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="text-sm font-semibold text-slate-900">{{ agent.name }}</div>
+                <div class="mt-1 text-xs text-slate-500">
+                  Weight {{ agent.weight }}
+                  <template v-if="agent.active_version_number"> &middot; v{{ agent.active_version_number }}</template>
+                </div>
+              </div>
+              <span class="badge" :class="statusClass(agent.status)">{{ agent.status }}</span>
+            </div>
+            <div v-if="agent.description" class="mt-2 text-xs text-slate-500 line-clamp-2">
+              {{ agent.description }}
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <div class="border-t px-4 py-4" style="border-color: rgba(17,17,17,0.06);">
         <button
-          class="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500 text-white hover:bg-blue-600 transition-colors"
-          @click="activeTab = 'add'; selectedAgent = null"
+          class="button-primary w-full"
+          @click="startNewAgent"
         >
           Add Agent
         </button>
       </div>
-
-      <!-- List -->
-      <div class="flex-1 overflow-y-auto">
-        <div v-if="listLoading" class="flex items-center justify-center h-full text-slate-400 text-sm">
-          Loading...
-        </div>
-        <div v-else-if="agents.length === 0" class="flex items-center justify-center h-full text-slate-400 text-sm p-6 text-center">
-          No agents yet. Add your first agent to begin split testing.
-        </div>
-        <div
-          v-for="agent in agents"
-          :key="agent.id"
-          class="flex flex-col gap-0.5 px-4 py-3 border-b border-slate-700 cursor-pointer transition-colors hover:bg-surface-hover"
-          :class="{ 'bg-surface-hover border-l-[3px] border-l-blue-500': selectedAgent?.id === agent.id }"
-          @click="selectAgent(agent)"
-        >
-          <div class="flex justify-between items-center">
-            <span class="font-semibold text-sm text-slate-100">{{ agent.name }}</span>
-            <span
-              class="text-[11px] px-2 py-0.5 rounded-full font-medium"
-              :class="statusClass(agent.status)"
-            >{{ agent.status }}</span>
-          </div>
-          <div class="flex items-center gap-3 mt-1">
-            <span class="text-[12px] text-slate-400">Weight: {{ agent.weight }}</span>
-            <span v-if="agent.active_version_number" class="text-[12px] text-slate-500">v{{ agent.active_version_number }}</span>
-            <span v-else class="text-[12px] text-slate-500 italic">no version</span>
-          </div>
-        </div>
-      </div>
-    </div>
+    </aside>
 
     <!-- Right: Tabbed panel -->
-    <div class="flex-1 bg-surface border border-slate-700 rounded-lg overflow-hidden flex flex-col">
-      <!-- Tab bar -->
-      <div class="flex border-b border-slate-700 shrink-0">
-        <button
-          class="flex-1 px-4 py-3 text-sm font-medium transition-colors"
-          :class="activeTab === 'add' ? 'text-blue-400 border-b-2 border-blue-500 bg-surface-hover' : 'text-slate-400 hover:text-slate-200'"
-          @click="activeTab = 'add'; selectedAgent = null"
-        >
-          Add Agent
-        </button>
-        <button
-          class="flex-1 px-4 py-3 text-sm font-medium transition-colors"
-          :class="activeTab === 'detail' ? 'text-blue-400 border-b-2 border-blue-500 bg-surface-hover' : 'text-slate-400 hover:text-slate-200'"
-          :disabled="!selectedAgent"
-          @click="activeTab = 'detail'"
-        >
-          Agent Detail
-        </button>
-        <button
-          class="flex-1 px-4 py-3 text-sm font-medium transition-colors"
-          :class="activeTab === 'versions' ? 'text-blue-400 border-b-2 border-blue-500 bg-surface-hover' : 'text-slate-400 hover:text-slate-200'"
-          :disabled="!selectedAgent"
-          @click="activeTab = 'versions'"
-        >
-          Versions
-        </button>
-      </div>
-
-      <!-- Add Agent Form -->
-      <div v-if="activeTab === 'add'" class="flex-1 overflow-y-auto p-6">
-        <form @submit.prevent="createAgent" class="max-w-md space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Agent Name *</label>
-            <input
-              v-model="addForm.name"
-              type="text"
-              required
-              placeholder="e.g. Friendly Closer"
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-            />
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Weight</label>
-            <input
-              v-model.number="addForm.weight"
-              type="number"
-              min="1"
-              max="1000"
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-            />
-            <p class="text-[12px] text-slate-500 mt-1">Relative weight for A/B split testing. Higher = more traffic.</p>
-          </div>
-
-          <!-- Success/Error messages -->
-          <div v-if="addSuccess" class="bg-green-500/10 border border-green-500/30 text-green-400 text-sm px-4 py-3 rounded-lg">
-            {{ addSuccess }}
-          </div>
-          <div v-if="addError" class="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
-            {{ addError }}
-          </div>
-
+    <section class="panel min-h-[560px] overflow-hidden p-0">
+      <div class="border-b border-slate-200/80 px-5 py-4">
+        <div class="flex flex-wrap gap-2">
           <button
-            type="submit"
-            :disabled="addLoading"
-            class="w-full py-2.5 rounded-lg text-sm font-medium bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 transition-colors"
+            class="pill-tab"
+            :class="activeTab === 'add' ? 'pill-tab-active' : ''"
+            @click="startNewAgent"
           >
-            {{ addLoading ? 'Creating...' : 'Add Agent' }}
+            Create agent
           </button>
-        </form>
+          <button
+            class="pill-tab"
+            :class="activeTab === 'detail' ? 'pill-tab-active' : ''"
+            :disabled="!selectedAgent"
+            @click="activeTab = 'detail'"
+          >
+            Agent settings
+          </button>
+          <button
+            class="pill-tab"
+            :class="activeTab === 'history' ? 'pill-tab-active' : ''"
+            :disabled="!selectedAgent"
+            @click="activeTab = 'history'"
+          >
+            History
+          </button>
+        </div>
       </div>
 
-      <!-- Agent Detail -->
-      <div v-else-if="activeTab === 'detail'" class="flex-1 overflow-y-auto p-6">
-        <div v-if="!selectedAgent" class="flex items-center justify-center h-full text-slate-400 text-sm">
-          Select an agent from the list to view details
+      <!-- ═══ Create Agent (full form) ═══ -->
+      <div v-if="activeTab === 'add'" class="px-5 py-5 sm:px-6 sm:py-6 overflow-y-auto" style="max-height: calc(100vh - 360px);">
+        <div class="mx-auto max-w-2xl space-y-6">
+          <div>
+            <div class="page-kicker">New Agent</div>
+            <h2 class="section-title mt-3">Create a new agent</h2>
+            <p class="section-copy mt-2">
+              Configure everything about this agent &mdash; its identity, prompt, behaviour rules, and AI settings.
+            </p>
+          </div>
+
+          <form class="space-y-6" @submit.prevent="createAgent">
+            <!-- Identity -->
+            <fieldset class="panel-muted space-y-4">
+              <legend class="form-label">Identity</legend>
+
+              <div>
+                <label class="form-label">Agent Name *</label>
+                <input
+                  v-model="addForm.name"
+                  type="text"
+                  required
+                  placeholder="e.g. Friendly Closer"
+                  class="input"
+                />
+              </div>
+
+              <div>
+                <label class="form-label">Description</label>
+                <textarea
+                  v-model="addForm.description"
+                  rows="2"
+                  placeholder="Brief description of this agent's personality or approach"
+                  class="input"
+                ></textarea>
+                <p class="form-help">Helps distinguish agents at a glance.</p>
+              </div>
+
+              <div class="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label class="form-label">Weight</label>
+                  <input
+                    v-model.number="addForm.weight"
+                    type="number"
+                    min="1"
+                    max="1000"
+                    class="input"
+                  />
+                  <p class="form-help">Higher = more traffic in A/B split testing.</p>
+                </div>
+                <div>
+                  <label class="form-label">AI Provider</label>
+                  <select v-model="addForm.ai_provider_integration_id" class="select">
+                    <option value="">Default (workspace setting)</option>
+                    <option v-for="intg in aiProviders" :key="intg.id" :value="intg.id">
+                      {{ intg.provider }} {{ intg.label ? '- ' + intg.label : '' }}
+                    </option>
+                  </select>
+                </div>
+              </div>
+            </fieldset>
+
+            <!-- Prompt -->
+            <fieldset class="panel-muted">
+              <legend class="form-label">Prompt *</legend>
+              <textarea
+                v-model="addForm.prompt_text"
+                required
+                rows="6"
+                placeholder="You are a helpful sales assistant who qualifies leads for home improvement services..."
+                class="input font-mono text-sm"
+              ></textarea>
+              <p class="form-help">The main guidance prompt sent to the AI for each conversation turn.</p>
+            </fieldset>
+
+            <!-- System Rules -->
+            <fieldset class="panel-muted space-y-4">
+              <legend class="form-label">System Rules</legend>
+
+              <div class="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label class="form-label">Tone</label>
+                  <select v-model="addForm.tone" class="select">
+                    <option value="friendly">Friendly</option>
+                    <option value="professional">Professional</option>
+                    <option value="casual">Casual</option>
+                    <option value="formal">Formal</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="form-label">Max Message Length</label>
+                  <input
+                    v-model.number="addForm.max_message_length"
+                    type="number"
+                    min="50"
+                    max="1600"
+                    class="input"
+                  />
+                  <p class="form-help">Characters. SMS limit is 160 (or 1600 for long SMS).</p>
+                </div>
+              </div>
+            </fieldset>
+
+            <!-- Reply Cadence -->
+            <fieldset class="panel-muted space-y-4">
+              <legend class="form-label">Reply Cadence</legend>
+
+              <div class="grid gap-4 sm:grid-cols-3">
+                <div>
+                  <label class="form-label">Initial Delay (s)</label>
+                  <input
+                    v-model.number="addForm.initial_delay_seconds"
+                    type="number"
+                    min="0"
+                    class="input"
+                  />
+                </div>
+                <div>
+                  <label class="form-label">Followup Delay (s)</label>
+                  <input
+                    v-model.number="addForm.followup_delay_seconds"
+                    type="number"
+                    min="0"
+                    class="input"
+                  />
+                </div>
+                <div>
+                  <label class="form-label">Max Followups</label>
+                  <input
+                    v-model.number="addForm.max_followups"
+                    type="number"
+                    min="0"
+                    class="input"
+                  />
+                </div>
+              </div>
+            </fieldset>
+
+            <!-- Allowed Actions -->
+            <fieldset class="panel-muted space-y-4">
+              <legend class="form-label">Allowed Actions</legend>
+              <p class="text-sm text-slate-500 -mt-2">Control what this agent is permitted to do during a conversation.</p>
+
+              <label class="flex items-center gap-3 text-sm text-slate-700">
+                <input
+                  v-model="addForm.can_book"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                />
+                Can book appointments
+              </label>
+
+              <label class="flex items-center gap-3 text-sm text-slate-700">
+                <input
+                  v-model="addForm.can_escalate_to_human"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                />
+                Can escalate to a human
+              </label>
+
+              <label class="flex items-center gap-3 text-sm text-slate-700">
+                <input
+                  v-model="addForm.can_close_unqualified"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                />
+                Can close unqualified leads
+              </label>
+            </fieldset>
+
+            <!-- Qualification Rules -->
+            <fieldset class="panel-muted space-y-4">
+              <legend class="form-label">Qualification Rules</legend>
+              <p class="text-sm text-slate-500 -mt-2">Fields the agent must collect before qualifying a lead.</p>
+
+              <div class="flex flex-wrap gap-2">
+                <span
+                  v-for="(field, i) in addForm.required_fields"
+                  :key="i"
+                  class="inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium text-slate-700"
+                  style="border-color: rgba(17,17,17,0.08); background: rgba(255,255,255,0.92);"
+                >
+                  {{ field }}
+                  <button type="button" class="ml-1 text-slate-400 hover:text-red-500" @click="addForm.required_fields.splice(i, 1)">&times;</button>
+                </span>
+              </div>
+
+              <div class="flex gap-2">
+                <input
+                  v-model="newAddField"
+                  type="text"
+                  placeholder="e.g. budget, timeline, service_interest"
+                  class="input flex-1"
+                  @keydown.enter.prevent="addFieldTo('add')"
+                />
+                <button type="button" class="button-secondary" @click="addFieldTo('add')">Add</button>
+              </div>
+            </fieldset>
+
+            <!-- AI Config -->
+            <fieldset class="panel-muted space-y-4">
+              <legend class="form-label">AI Configuration</legend>
+
+              <div class="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label class="form-label">Model</label>
+                  <select v-model="addForm.model" class="select">
+                    <option value="">Default</option>
+                    <option value="gpt-4o-mini">GPT-4o Mini</option>
+                    <option value="gpt-4o">GPT-4o</option>
+                    <option value="claude-sonnet-4-20250514">Claude Sonnet</option>
+                    <option value="claude-haiku-4-5-20251001">Claude Haiku</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="form-label">Temperature</label>
+                  <input
+                    v-model.number="addForm.temperature"
+                    type="number"
+                    min="0"
+                    max="2"
+                    step="0.1"
+                    class="input"
+                  />
+                  <p class="form-help">0 = deterministic, 1 = creative, 2 = very random.</p>
+                </div>
+              </div>
+            </fieldset>
+
+            <div v-if="addSuccess" class="feedback-success">{{ addSuccess }}</div>
+            <div v-if="addError" class="feedback-error">{{ addError }}</div>
+
+            <button type="submit" :disabled="addLoading" class="button-primary w-full sm:w-auto">
+              {{ addLoading ? 'Creating...' : 'Create Agent' }}
+            </button>
+          </form>
         </div>
-        <div v-else class="max-w-md space-y-4">
-          <div class="flex items-center gap-3 mb-6">
-            <div class="w-12 h-12 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-lg">
-              {{ selectedAgent.name[0] }}{{ selectedAgent.name[1] || '' }}
+      </div>
+
+      <!-- ═══ Agent Settings (edit all, auto-versions on save) ═══ -->
+      <div v-else-if="activeTab === 'detail'" class="px-5 py-5 sm:px-6 sm:py-6 overflow-y-auto" style="max-height: calc(100vh - 360px);">
+        <div v-if="!selectedAgent" class="empty-state min-h-[420px]">
+          Select an agent from the list to view settings.
+        </div>
+        <div v-else class="mx-auto max-w-2xl space-y-6">
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex items-center gap-4">
+              <div class="flex h-14 w-14 items-center justify-center rounded-[20px] bg-teal-100 text-lg font-bold text-teal-700">
+                {{ selectedAgent.name.charAt(0).toUpperCase() }}{{ selectedAgent.name.charAt(1)?.toUpperCase() || '' }}
+              </div>
+              <div>
+                <div class="page-kicker">Agent Settings</div>
+                <h2 class="section-title mt-2">{{ selectedAgent.name }}</h2>
+                <p class="section-copy mt-1">
+                  {{ selectedAgent.status }}
+                  <template v-if="selectedAgent.active_version_number"> &middot; v{{ selectedAgent.active_version_number }}</template>
+                </p>
+              </div>
             </div>
-            <div>
-              <div class="text-lg font-semibold">{{ selectedAgent.name }}</div>
-              <div class="text-sm text-slate-400">{{ selectedAgent.status }} - Weight {{ selectedAgent.weight }}</div>
-            </div>
+            <span class="badge self-start sm:self-auto" :class="statusClass(selectedAgent.status)">{{ selectedAgent.status }}</span>
           </div>
 
           <!-- Split test weight visualization -->
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-2">Split Test Weight Distribution</label>
-            <div class="w-full h-6 bg-slate-800 rounded-lg overflow-hidden flex">
+          <div class="panel-muted">
+            <label class="form-label">Split Test Weight Distribution</label>
+            <div class="mt-2 flex h-7 w-full overflow-hidden rounded-full" style="background: rgba(17,17,17,0.06);">
               <div
-                class="h-full bg-blue-500 flex items-center justify-center text-[10px] font-medium text-white"
-                :style="{ width: weightPercent + '%', minWidth: weightPercent > 0 ? '40px' : '0' }"
+                class="flex h-full items-center justify-center rounded-full text-[11px] font-semibold text-white"
+                :style="{ width: Math.max(weightPercent, 8) + '%', background: '#111' }"
               >
                 {{ weightPercent }}%
               </div>
               <div
                 v-if="weightPercent < 100"
-                class="h-full bg-slate-700 flex items-center justify-center text-[10px] font-medium text-slate-400"
+                class="flex h-full items-center justify-center text-[11px] font-medium text-slate-500"
                 :style="{ width: (100 - weightPercent) + '%' }"
               >
                 Others {{ 100 - weightPercent }}%
@@ -153,186 +366,336 @@
             </div>
           </div>
 
-          <!-- Editable fields -->
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Name</label>
-            <input
-              v-model="editForm.name"
-              type="text"
-              required
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-            />
-          </div>
+          <!-- Identity -->
+          <fieldset class="panel-muted space-y-4">
+            <legend class="form-label">Identity</legend>
 
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Weight</label>
-            <input
-              v-model.number="editForm.weight"
-              type="number"
-              min="1"
-              max="1000"
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
-            />
-          </div>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label class="form-label">Name</label>
+                <input v-model="editForm.name" type="text" required class="input" />
+              </div>
+              <div>
+                <label class="form-label">Status</label>
+                <select v-model="editForm.status" class="select">
+                  <option value="active">Active</option>
+                  <option value="paused">Paused</option>
+                  <option value="archived">Archived</option>
+                </select>
+              </div>
+            </div>
 
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Status</label>
-            <select
-              v-model="editForm.status"
-              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+            <div>
+              <label class="form-label">Description</label>
+              <textarea
+                v-model="editForm.description"
+                rows="2"
+                placeholder="Brief description"
+                class="input"
+              ></textarea>
+            </div>
+
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label class="form-label">Weight</label>
+                <input
+                  v-model.number="editForm.weight"
+                  type="number"
+                  min="1"
+                  max="1000"
+                  class="input"
+                />
+              </div>
+              <div>
+                <label class="form-label">AI Provider</label>
+                <select v-model="editForm.ai_provider_integration_id" class="select">
+                  <option value="">Default (workspace setting)</option>
+                  <option v-for="intg in aiProviders" :key="intg.id" :value="intg.id">
+                    {{ intg.provider }} {{ intg.label ? '- ' + intg.label : '' }}
+                  </option>
+                </select>
+              </div>
+            </div>
+          </fieldset>
+
+          <!-- Prompt -->
+          <fieldset class="panel-muted">
+            <legend class="form-label">Prompt</legend>
+            <textarea
+              v-model="editForm.prompt_text"
+              rows="6"
+              placeholder="You are a helpful sales assistant who qualifies leads..."
+              class="input font-mono text-sm"
+            ></textarea>
+            <p class="form-help">The main guidance prompt sent to the AI for each conversation turn.</p>
+          </fieldset>
+
+          <!-- System Rules -->
+          <fieldset class="panel-muted space-y-4">
+            <legend class="form-label">System Rules</legend>
+
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label class="form-label">Tone</label>
+                <select v-model="editForm.tone" class="select">
+                  <option value="friendly">Friendly</option>
+                  <option value="professional">Professional</option>
+                  <option value="casual">Casual</option>
+                  <option value="formal">Formal</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label">Max Message Length</label>
+                <input
+                  v-model.number="editForm.max_message_length"
+                  type="number"
+                  min="50"
+                  max="1600"
+                  class="input"
+                />
+                <p class="form-help">Characters. SMS limit is 160 (or 1600 for long SMS).</p>
+              </div>
+            </div>
+          </fieldset>
+
+          <!-- Reply Cadence -->
+          <fieldset class="panel-muted space-y-4">
+            <legend class="form-label">Reply Cadence</legend>
+
+            <div class="grid gap-4 sm:grid-cols-3">
+              <div>
+                <label class="form-label">Initial Delay (s)</label>
+                <input
+                  v-model.number="editForm.initial_delay_seconds"
+                  type="number"
+                  min="0"
+                  class="input"
+                />
+              </div>
+              <div>
+                <label class="form-label">Followup Delay (s)</label>
+                <input
+                  v-model.number="editForm.followup_delay_seconds"
+                  type="number"
+                  min="0"
+                  class="input"
+                />
+              </div>
+              <div>
+                <label class="form-label">Max Followups</label>
+                <input
+                  v-model.number="editForm.max_followups"
+                  type="number"
+                  min="0"
+                  class="input"
+                />
+              </div>
+            </div>
+          </fieldset>
+
+          <!-- Allowed Actions -->
+          <fieldset class="panel-muted space-y-4">
+            <legend class="form-label">Allowed Actions</legend>
+            <p class="text-sm text-slate-500 -mt-2">Control what this agent is permitted to do during a conversation.</p>
+
+            <label class="flex items-center gap-3 text-sm text-slate-700">
+              <input
+                v-model="editForm.can_book"
+                type="checkbox"
+                class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+              />
+              Can book appointments
+            </label>
+
+            <label class="flex items-center gap-3 text-sm text-slate-700">
+              <input
+                v-model="editForm.can_escalate_to_human"
+                type="checkbox"
+                class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+              />
+              Can escalate to a human
+            </label>
+
+            <label class="flex items-center gap-3 text-sm text-slate-700">
+              <input
+                v-model="editForm.can_close_unqualified"
+                type="checkbox"
+                class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+              />
+              Can close unqualified leads
+            </label>
+          </fieldset>
+
+          <!-- Qualification Rules -->
+          <fieldset class="panel-muted space-y-4">
+            <legend class="form-label">Qualification Rules</legend>
+            <p class="text-sm text-slate-500 -mt-2">Fields the agent must collect before qualifying a lead.</p>
+
+            <div class="flex flex-wrap gap-2">
+              <span
+                v-for="(field, i) in editForm.required_fields"
+                :key="i"
+                class="inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium text-slate-700"
+                style="border-color: rgba(17,17,17,0.08); background: rgba(255,255,255,0.92);"
+              >
+                {{ field }}
+                <button type="button" class="ml-1 text-slate-400 hover:text-red-500" @click="editForm.required_fields.splice(i, 1)">&times;</button>
+              </span>
+            </div>
+
+            <div class="flex gap-2">
+              <input
+                v-model="newEditField"
+                type="text"
+                placeholder="e.g. budget, timeline, service_interest"
+                class="input flex-1"
+                @keydown.enter.prevent="addFieldTo('edit')"
+              />
+              <button type="button" class="button-secondary" @click="addFieldTo('edit')">Add</button>
+            </div>
+          </fieldset>
+
+          <!-- AI Config -->
+          <fieldset class="panel-muted space-y-4">
+            <legend class="form-label">AI Configuration</legend>
+
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label class="form-label">Model</label>
+                <select v-model="editForm.model" class="select">
+                  <option value="">Default</option>
+                  <option value="gpt-4o-mini">GPT-4o Mini</option>
+                  <option value="gpt-4o">GPT-4o</option>
+                  <option value="claude-sonnet-4-20250514">Claude Sonnet</option>
+                  <option value="claude-haiku-4-5-20251001">Claude Haiku</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label">Temperature</label>
+                <input
+                  v-model.number="editForm.temperature"
+                  type="number"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                  class="input"
+                />
+                <p class="form-help">0 = deterministic, 1 = creative, 2 = very random.</p>
+              </div>
+            </div>
+          </fieldset>
+
+          <div v-if="editSuccess" class="feedback-success">{{ editSuccess }}</div>
+          <div v-if="editError" class="feedback-error">{{ editError }}</div>
+
+          <p class="text-xs text-slate-400">Saving prompt or behaviour changes automatically creates a new version.</p>
+
+          <div class="flex gap-3">
+            <button
+              type="button"
+              :disabled="editLoading"
+              class="button-primary w-full sm:w-auto"
+              @click="updateAgent"
             >
-              <option value="active">Active</option>
-              <option value="paused">Paused</option>
-              <option value="archived">Archived</option>
-            </select>
+              {{ editLoading ? 'Saving...' : 'Save Changes' }}
+            </button>
+            <button
+              v-if="selectedAgent.status !== 'archived'"
+              type="button"
+              class="button-ghost w-full sm:w-auto text-red-600"
+              @click="archiveAgent"
+            >
+              Archive Agent
+            </button>
           </div>
-
-          <!-- Success/Error messages -->
-          <div v-if="editSuccess" class="bg-green-500/10 border border-green-500/30 text-green-400 text-sm px-4 py-3 rounded-lg">
-            {{ editSuccess }}
-          </div>
-          <div v-if="editError" class="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
-            {{ editError }}
-          </div>
-
-          <button
-            :disabled="editLoading"
-            class="w-full py-2.5 rounded-lg text-sm font-medium bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 transition-colors"
-            @click="updateAgent"
-          >
-            {{ editLoading ? 'Saving...' : 'Save Changes' }}
-          </button>
         </div>
       </div>
 
-      <!-- Versions -->
-      <div v-else-if="activeTab === 'versions'" class="flex-1 overflow-y-auto p-6">
-        <div v-if="!selectedAgent" class="flex items-center justify-center h-full text-slate-400 text-sm">
-          Select an agent from the list to manage versions
+      <!-- ═══ History (read-only version log) ═══ -->
+      <div v-else-if="activeTab === 'history'" class="px-5 py-5 sm:px-6 sm:py-6 overflow-y-auto" style="max-height: calc(100vh - 360px);">
+        <div v-if="!selectedAgent" class="empty-state min-h-[420px]">
+          Select an agent from the list to view history.
         </div>
-        <div v-else class="space-y-6">
-          <!-- Existing versions list -->
+        <div v-else class="mx-auto max-w-2xl space-y-6">
           <div>
-            <h3 class="text-sm font-medium text-slate-300 mb-3">Existing Versions</h3>
-            <div v-if="versionsLoading" class="text-slate-400 text-sm">Loading versions...</div>
-            <div v-else-if="versions.length === 0" class="text-slate-500 text-sm">No versions yet. Create the first version below.</div>
-            <div v-else class="space-y-2">
-              <div
-                v-for="ver in versions"
-                :key="ver.id"
-                class="flex items-center justify-between px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-lg"
-              >
+            <div class="page-kicker">Version History</div>
+            <h2 class="section-title mt-3">{{ selectedAgent.name }}</h2>
+            <p class="section-copy mt-2">
+              Each time you save prompt or behaviour changes, a new version is recorded here. You can revert to any previous version.
+            </p>
+          </div>
+
+          <div v-if="versionsLoading" class="note-box">Loading history...</div>
+          <div v-else-if="versions.length === 0" class="note-box">No versions yet. Save the agent settings to create the first version.</div>
+          <div v-else class="space-y-3">
+            <div
+              v-for="ver in versions"
+              :key="ver.id"
+              class="rounded-[16px] border px-4 py-4"
+              :style="ver.is_active
+                ? 'border-color: rgba(22,163,74,0.2); background: rgba(22,163,74,0.04);'
+                : 'border-color: rgba(17,17,17,0.06); background: rgba(251,251,249,0.94);'"
+            >
+              <div class="flex items-center justify-between">
                 <div class="flex items-center gap-3">
-                  <span class="text-sm font-medium text-slate-100">Version {{ ver.version_number }}</span>
+                  <span class="text-sm font-semibold text-slate-900">v{{ ver.version_number }}</span>
                   <span
                     v-if="ver.is_active"
-                    class="text-[11px] px-2 py-0.5 rounded-full font-medium bg-green-500/15 text-green-400"
-                  >active</span>
-                  <span
-                    v-else
-                    class="text-[11px] px-2 py-0.5 rounded-full font-medium bg-slate-500/15 text-slate-400"
-                  >inactive</span>
+                    class="badge bg-emerald-50 text-emerald-700"
+                  >current</span>
                 </div>
-                <span class="text-[12px] text-slate-500">{{ formatDate(ver.created_at) }}</span>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-slate-500">{{ formatDate(ver.created_at) }}</span>
+                  <button
+                    v-if="!ver.is_active"
+                    class="button-secondary px-3 py-1.5 text-xs"
+                    @click="revertToVersion(ver)"
+                  >
+                    Revert
+                  </button>
+                </div>
               </div>
+              <!-- Collapsed summary -->
+              <div
+                v-if="expandedVersion === ver.id"
+                class="mt-3 space-y-2 border-t pt-3"
+                style="border-color: rgba(17,17,17,0.06);"
+              >
+                <div>
+                  <span class="text-xs font-medium text-slate-500">Prompt</span>
+                  <pre class="mt-1 whitespace-pre-wrap rounded-lg bg-white/60 p-3 text-xs text-slate-700 font-mono">{{ ver.prompt_text }}</pre>
+                </div>
+                <div v-if="ver.system_rules_json" class="text-xs text-slate-600">
+                  <span class="font-medium text-slate-500">Tone:</span> {{ (ver.system_rules_json as Record<string, unknown>).tone ?? 'friendly' }}
+                  &middot;
+                  <span class="font-medium text-slate-500">Max length:</span> {{ (ver.system_rules_json as Record<string, unknown>).max_message_length ?? 160 }}
+                </div>
+                <div v-if="ver.config_json" class="text-xs text-slate-600">
+                  <span class="font-medium text-slate-500">Model:</span> {{ (ver.config_json as Record<string, unknown>).model || 'Default' }}
+                  &middot;
+                  <span class="font-medium text-slate-500">Temperature:</span> {{ (ver.config_json as Record<string, unknown>).temperature ?? 0.7 }}
+                </div>
+              </div>
+              <button
+                type="button"
+                class="mt-2 text-xs font-medium text-teal-700 hover:text-teal-900"
+                @click="expandedVersion = expandedVersion === ver.id ? null : ver.id"
+              >
+                {{ expandedVersion === ver.id ? 'Hide details' : 'Show details' }}
+              </button>
             </div>
           </div>
 
-          <!-- Create new version form -->
-          <div class="border-t border-slate-700 pt-6">
-            <h3 class="text-sm font-medium text-slate-300 mb-3">Create New Version</h3>
-            <form @submit.prevent="createVersion" class="space-y-4">
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">Prompt Text *</label>
-                <textarea
-                  v-model="versionForm.prompt_text"
-                  required
-                  rows="6"
-                  placeholder="You are a helpful sales assistant..."
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 font-mono"
-                ></textarea>
-              </div>
-
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">System Rules (JSON, optional)</label>
-                <textarea
-                  v-model="versionForm.system_rules_json"
-                  rows="3"
-                  placeholder='{"max_response_length": 160, "tone": "friendly"}'
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 font-mono"
-                ></textarea>
-              </div>
-
-              <!-- Reply cadence fields -->
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-2">Reply Cadence</label>
-                <div class="grid grid-cols-3 gap-3">
-                  <div>
-                    <label class="block text-[12px] text-slate-400 mb-1">Initial Delay (s)</label>
-                    <input
-                      v-model.number="versionForm.initial_delay_seconds"
-                      type="number"
-                      min="0"
-                      class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label class="block text-[12px] text-slate-400 mb-1">Followup Delay (s)</label>
-                    <input
-                      v-model.number="versionForm.followup_delay_seconds"
-                      type="number"
-                      min="0"
-                      class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label class="block text-[12px] text-slate-400 mb-1">Max Followups</label>
-                    <input
-                      v-model.number="versionForm.max_followups"
-                      type="number"
-                      min="0"
-                      class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">Config JSON (optional)</label>
-                <textarea
-                  v-model="versionForm.config_json"
-                  rows="3"
-                  placeholder='{"model": "gpt-4o-mini", "temperature": 0.7}'
-                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 font-mono"
-                ></textarea>
-              </div>
-
-              <!-- Success/Error messages -->
-              <div v-if="versionSuccess" class="bg-green-500/10 border border-green-500/30 text-green-400 text-sm px-4 py-3 rounded-lg">
-                {{ versionSuccess }}
-              </div>
-              <div v-if="versionError" class="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
-                {{ versionError }}
-              </div>
-
-              <button
-                type="submit"
-                :disabled="versionLoading"
-                class="w-full py-2.5 rounded-lg text-sm font-medium bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 transition-colors"
-              >
-                {{ versionLoading ? 'Creating...' : 'Create Version' }}
-              </button>
-            </form>
-          </div>
+          <div v-if="historySuccess" class="feedback-success">{{ historySuccess }}</div>
+          <div v-if="historyError" class="feedback-error">{{ historyError }}</div>
         </div>
       </div>
-    </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
-import { getPublicSupabaseClient } from '@lib/config/public-client';
 
 const props = defineProps<{
   campaignId: string;
@@ -340,14 +703,15 @@ const props = defineProps<{
 }>();
 
 const API_BASE = '/api';
-const supabase = getPublicSupabaseClient();
 
 interface AgentRecord {
   id: string;
   campaign_id: string;
   name: string;
+  description: string | null;
   weight: number;
   status: string;
+  ai_provider_integration_id: string | null;
   active_version_number: number | null;
   created_at: string;
   updated_at: string;
@@ -360,45 +724,96 @@ interface VersionRecord {
   prompt_text: string;
   system_rules_json: Record<string, unknown> | null;
   reply_cadence_json: Record<string, unknown> | null;
+  allowed_actions_json: Record<string, unknown> | null;
+  qualification_rules_json: Record<string, unknown> | null;
   config_json: Record<string, unknown> | null;
   is_active: boolean;
   created_at: string;
 }
 
+interface IntegrationRecord {
+  id: string;
+  provider: string;
+  label?: string;
+}
+
+interface PromptFields {
+  prompt_text: string;
+  tone: string;
+  max_message_length: number;
+  initial_delay_seconds: number;
+  followup_delay_seconds: number;
+  max_followups: number;
+  can_book: boolean;
+  can_escalate_to_human: boolean;
+  can_close_unqualified: boolean;
+  required_fields: string[];
+  model: string;
+  temperature: number;
+}
+
+const DEFAULT_PROMPT_FIELDS: PromptFields = {
+  prompt_text: '',
+  tone: 'friendly',
+  max_message_length: 160,
+  initial_delay_seconds: 30,
+  followup_delay_seconds: 3600,
+  max_followups: 5,
+  can_book: true,
+  can_escalate_to_human: true,
+  can_close_unqualified: false,
+  required_fields: [],
+  model: '',
+  temperature: 0.7,
+};
+
 // State
 const agents = ref<AgentRecord[]>([]);
 const listLoading = ref(true);
 const selectedAgent = ref<AgentRecord | null>(null);
-const activeTab = ref<'add' | 'detail' | 'versions'>('add');
+const activeTab = ref<'add' | 'detail' | 'history'>('add');
 
 // Versions state
 const versions = ref<VersionRecord[]>([]);
 const versionsLoading = ref(false);
+const expandedVersion = ref<string | null>(null);
 
-// Add agent form
-const addForm = ref({ name: '', weight: 100 });
+// AI providers
+const aiProviders = ref<IntegrationRecord[]>([]);
+
+// Add agent form (identity + prompt fields combined)
+const addForm = ref({
+  name: '',
+  description: '',
+  weight: 100,
+  ai_provider_integration_id: '',
+  ...structuredClone(DEFAULT_PROMPT_FIELDS),
+});
 const addLoading = ref(false);
 const addError = ref('');
 const addSuccess = ref('');
+const newAddField = ref('');
 
-// Edit agent form
-const editForm = ref({ name: '', weight: 100, status: 'active' });
+// Edit agent form (identity + prompt fields combined)
+const editForm = ref({
+  name: '',
+  description: '',
+  weight: 100,
+  status: 'active',
+  ai_provider_integration_id: '',
+  ...structuredClone(DEFAULT_PROMPT_FIELDS),
+});
 const editLoading = ref(false);
 const editError = ref('');
 const editSuccess = ref('');
+const newEditField = ref('');
 
-// Version form
-const versionForm = ref({
-  prompt_text: '',
-  system_rules_json: '',
-  initial_delay_seconds: 30,
-  followup_delay_seconds: 3600,
-  max_followups: 5,
-  config_json: '',
-});
-const versionLoading = ref(false);
-const versionError = ref('');
-const versionSuccess = ref('');
+// Snapshot of version fields at load time, used to detect prompt changes on save
+let editPromptSnapshot = '';
+
+// History tab feedback
+const historySuccess = ref('');
+const historyError = ref('');
 
 // Computed
 const totalWeight = computed(() => agents.value.reduce((sum, a) => sum + a.weight, 0));
@@ -410,21 +825,116 @@ const weightPercent = computed(() => {
 // Watchers
 watch(selectedAgent, (agent) => {
   if (agent) {
-    editForm.value = { name: agent.name, weight: agent.weight, status: agent.status };
+    loadEditForm(agent);
     fetchVersions(agent.id);
   } else {
     versions.value = [];
   }
 });
 
+function loadEditForm(agent: AgentRecord) {
+  // Load identity fields
+  editForm.value.name = agent.name;
+  editForm.value.description = agent.description ?? '';
+  editForm.value.weight = agent.weight;
+  editForm.value.status = agent.status;
+  editForm.value.ai_provider_integration_id = agent.ai_provider_integration_id ?? '';
+
+  // Load prompt fields from active version (if any)
+  const active = versions.value.find((v) => v.is_active);
+  populatePromptFromVersion(active);
+}
+
+function populatePromptFromVersion(ver: VersionRecord | undefined) {
+  if (ver) {
+    const sys = (ver.system_rules_json ?? {}) as Record<string, unknown>;
+    const cadence = (ver.reply_cadence_json ?? {}) as Record<string, unknown>;
+    const actions = (ver.allowed_actions_json ?? {}) as Record<string, unknown>;
+    const quals = (ver.qualification_rules_json ?? {}) as Record<string, unknown>;
+    const cfg = (ver.config_json ?? {}) as Record<string, unknown>;
+
+    editForm.value.prompt_text = ver.prompt_text ?? '';
+    editForm.value.tone = (sys.tone as string) ?? 'friendly';
+    editForm.value.max_message_length = (sys.max_message_length as number) ?? 160;
+    editForm.value.initial_delay_seconds = (cadence.initial_delay_seconds as number) ?? 30;
+    editForm.value.followup_delay_seconds = (cadence.followup_delay_seconds as number) ?? 3600;
+    editForm.value.max_followups = (cadence.max_followups as number) ?? 5;
+    editForm.value.can_book = (actions.can_book as boolean) ?? true;
+    editForm.value.can_escalate_to_human = (actions.can_escalate_to_human as boolean) ?? true;
+    editForm.value.can_close_unqualified = (actions.can_close_unqualified as boolean) ?? false;
+    editForm.value.required_fields = ((quals.required_fields as string[]) ?? []).slice();
+    editForm.value.model = (cfg.model as string) ?? '';
+    editForm.value.temperature = (cfg.temperature as number) ?? 0.7;
+  } else {
+    Object.assign(editForm.value, structuredClone(DEFAULT_PROMPT_FIELDS));
+  }
+  editPromptSnapshot = promptFingerprint(editForm.value);
+}
+
+function promptFingerprint(f: PromptFields): string {
+  return JSON.stringify({
+    prompt_text: f.prompt_text,
+    tone: f.tone,
+    max_message_length: f.max_message_length,
+    initial_delay_seconds: f.initial_delay_seconds,
+    followup_delay_seconds: f.followup_delay_seconds,
+    max_followups: f.max_followups,
+    can_book: f.can_book,
+    can_escalate_to_human: f.can_escalate_to_human,
+    can_close_unqualified: f.can_close_unqualified,
+    required_fields: f.required_fields,
+    model: f.model,
+    temperature: f.temperature,
+  });
+}
+
+function buildVersionPayload(f: PromptFields) {
+  const configJson: Record<string, unknown> = {};
+  if (f.model) configJson.model = f.model;
+  if (f.temperature !== undefined) configJson.temperature = f.temperature;
+
+  return {
+    prompt_text: f.prompt_text,
+    system_rules_json: { tone: f.tone, max_message_length: f.max_message_length },
+    reply_cadence_json: {
+      initial_delay_seconds: f.initial_delay_seconds,
+      followup_delay_seconds: f.followup_delay_seconds,
+      max_followups: f.max_followups,
+    },
+    allowed_actions_json: {
+      can_book: f.can_book,
+      can_escalate_to_human: f.can_escalate_to_human,
+      can_close_unqualified: f.can_close_unqualified,
+    },
+    qualification_rules_json: { required_fields: f.required_fields },
+    config_json: configJson,
+  };
+}
+
 // Methods
 function statusClass(status: string): string {
   switch (status) {
-    case 'active': return 'bg-green-500/15 text-green-400';
-    case 'paused': return 'bg-yellow-500/15 text-yellow-400';
-    case 'archived': return 'bg-slate-500/15 text-slate-400';
-    default: return 'bg-slate-500/15 text-slate-400';
+    case 'active': return 'bg-emerald-50 text-emerald-700';
+    case 'paused': return 'bg-amber-50 text-amber-700';
+    case 'archived': return 'bg-slate-100 text-slate-600';
+    case 'draft': return 'bg-blue-50 text-blue-700';
+    default: return 'bg-slate-100 text-slate-600';
   }
+}
+
+function startNewAgent() {
+  selectedAgent.value = null;
+  activeTab.value = 'add';
+  addForm.value = {
+    name: '',
+    description: '',
+    weight: 100,
+    ai_provider_integration_id: '',
+    ...structuredClone(DEFAULT_PROMPT_FIELDS),
+  };
+  addError.value = '';
+  addSuccess.value = '';
+  newAddField.value = '';
 }
 
 async function fetchAgents() {
@@ -441,6 +951,23 @@ async function fetchVersions(agentId: string) {
     if (res.ok) versions.value = await res.json();
   } finally {
     versionsLoading.value = false;
+    // Re-populate prompt fields from active version now that versions are loaded
+    if (selectedAgent.value) {
+      const active = versions.value.find((v) => v.is_active);
+      populatePromptFromVersion(active);
+    }
+  }
+}
+
+async function fetchAiProviders() {
+  try {
+    const res = await fetch(`${API_BASE}/api-integrations-list?type=ai_provider`);
+    if (res.ok) {
+      const data = await res.json();
+      aiProviders.value = data;
+    }
+  } catch {
+    // Non-critical
   }
 }
 
@@ -449,38 +976,67 @@ function selectAgent(agent: AgentRecord) {
   activeTab.value = 'detail';
 }
 
+function addFieldTo(target: 'add' | 'edit') {
+  const ref_val = target === 'add' ? newAddField : newEditField;
+  const form = target === 'add' ? addForm : editForm;
+  const field = ref_val.value.trim().toLowerCase().replace(/\s+/g, '_');
+  if (field && !form.value.required_fields.includes(field)) {
+    form.value.required_fields.push(field);
+  }
+  ref_val.value = '';
+}
+
 async function createAgent() {
   addError.value = '';
   addSuccess.value = '';
   addLoading.value = true;
 
   try {
+    // Step 1: Create the agent
     const res = await fetch(`${API_BASE}/api-agents-create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         campaign_id: props.campaignId,
         name: addForm.value.name,
+        description: addForm.value.description || undefined,
         weight: addForm.value.weight,
+        ai_provider_integration_id: addForm.value.ai_provider_integration_id || undefined,
       }),
     });
 
-    const data = await res.json();
+    const agentData = await res.json();
 
     if (!res.ok) {
-      addError.value = data.error || 'Failed to create agent';
+      addError.value = agentData.error || 'Failed to create agent';
       return;
     }
 
-    addSuccess.value = `Agent "${data.name}" created. Select it to add a prompt version.`;
-    addForm.value = { name: '', weight: 100 };
+    // Step 2: Create the initial version with all prompt settings
+    if (addForm.value.prompt_text.trim()) {
+      const versionPayload = buildVersionPayload(addForm.value);
+      const vRes = await fetch(`${API_BASE}/api-agent-versions-create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_id: agentData.id, ...versionPayload }),
+      });
+
+      if (!vRes.ok) {
+        const vData = await vRes.json();
+        addError.value = `Agent created but version failed: ${vData.error || 'Unknown error'}`;
+        await fetchAgents();
+        return;
+      }
+    }
+
+    addSuccess.value = `Agent "${agentData.name}" created successfully.`;
     await fetchAgents();
 
-    // Auto-select the new agent and switch to versions tab
-    const newAgent = agents.value.find((a: AgentRecord) => a.id === data.id);
+    // Auto-select the new agent and switch to settings
+    const newAgent = agents.value.find((a: AgentRecord) => a.id === agentData.id);
     if (newAgent) {
       selectedAgent.value = newAgent;
-      activeTab.value = 'versions';
+      activeTab.value = 'detail';
     }
   } catch {
     addError.value = 'Network error. Please try again.';
@@ -496,12 +1052,14 @@ async function updateAgent() {
   editLoading.value = true;
 
   try {
+    // Step 1: Update agent identity fields
     const res = await fetch(`${API_BASE}/api-agents-update`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         agent_id: selectedAgent.value.id,
         name: editForm.value.name,
+        description: editForm.value.description || null,
         weight: editForm.value.weight,
         status: editForm.value.status,
       }),
@@ -514,10 +1072,32 @@ async function updateAgent() {
       return;
     }
 
-    editSuccess.value = 'Agent updated successfully.';
-    await fetchAgents();
+    // Step 2: If prompt/behaviour fields changed, create a new version
+    const currentFingerprint = promptFingerprint(editForm.value);
+    let versionCreated = false;
 
-    // Re-select the updated agent to refresh local state
+    if (currentFingerprint !== editPromptSnapshot && editForm.value.prompt_text.trim()) {
+      const versionPayload = buildVersionPayload(editForm.value);
+      const vRes = await fetch(`${API_BASE}/api-agent-versions-create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_id: selectedAgent.value.id, ...versionPayload }),
+      });
+
+      if (!vRes.ok) {
+        const vData = await vRes.json();
+        editError.value = `Agent updated but new version failed: ${vData.error || 'Unknown error'}`;
+      } else {
+        versionCreated = true;
+      }
+    }
+
+    editSuccess.value = versionCreated
+      ? 'Agent updated. New version created.'
+      : 'Agent updated.';
+
+    await Promise.all([fetchAgents(), fetchVersions(selectedAgent.value.id)]);
+
     const updated = agents.value.find((a: AgentRecord) => a.id === selectedAgent.value!.id);
     if (updated) selectedAgent.value = updated;
   } catch {
@@ -527,86 +1107,82 @@ async function updateAgent() {
   }
 }
 
-async function createVersion() {
+async function archiveAgent() {
   if (!selectedAgent.value) return;
-  versionError.value = '';
-  versionSuccess.value = '';
-  versionLoading.value = true;
+  editError.value = '';
+  editSuccess.value = '';
+  editLoading.value = true;
 
   try {
-    let systemRules: Record<string, unknown> | undefined;
-    if (versionForm.value.system_rules_json.trim()) {
-      try {
-        systemRules = JSON.parse(versionForm.value.system_rules_json);
-      } catch {
-        versionError.value = 'System rules must be valid JSON.';
-        versionLoading.value = false;
-        return;
-      }
-    }
-
-    let configJson: Record<string, unknown> | undefined;
-    if (versionForm.value.config_json.trim()) {
-      try {
-        configJson = JSON.parse(versionForm.value.config_json);
-      } catch {
-        versionError.value = 'Config must be valid JSON.';
-        versionLoading.value = false;
-        return;
-      }
-    }
-
-    const replyCadence = {
-      initial_delay_seconds: versionForm.value.initial_delay_seconds,
-      followup_delay_seconds: versionForm.value.followup_delay_seconds,
-      max_followups: versionForm.value.max_followups,
-    };
-
-    const res = await fetch(`${API_BASE}/api-agent-versions-create`, {
-      method: 'POST',
+    const res = await fetch(`${API_BASE}/api-agents-update`, {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         agent_id: selectedAgent.value.id,
-        prompt_text: versionForm.value.prompt_text,
-        system_rules_json: systemRules,
-        reply_cadence_json: replyCadence,
-        config_json: configJson,
+        status: 'archived',
       }),
     });
 
     const data = await res.json();
 
     if (!res.ok) {
-      versionError.value = data.error || 'Failed to create version';
+      editError.value = data.error || 'Failed to archive agent';
       return;
     }
 
-    versionSuccess.value = `Version ${data.version_number} created and set as active.`;
-    versionForm.value = {
-      prompt_text: '',
-      system_rules_json: '',
-      initial_delay_seconds: 30,
-      followup_delay_seconds: 3600,
-      max_followups: 5,
-      config_json: '',
-    };
+    editSuccess.value = 'Agent archived.';
+    await fetchAgents();
 
-    // Refresh versions list and agent list (active version may have changed)
-    await Promise.all([fetchVersions(selectedAgent.value.id), fetchAgents()]);
-
-    // Re-select to update active_version_number display
     const updated = agents.value.find((a: AgentRecord) => a.id === selectedAgent.value!.id);
     if (updated) selectedAgent.value = updated;
   } catch {
-    versionError.value = 'Network error. Please try again.';
+    editError.value = 'Network error. Please try again.';
   } finally {
-    versionLoading.value = false;
+    editLoading.value = false;
+  }
+}
+
+async function revertToVersion(ver: VersionRecord) {
+  if (!selectedAgent.value) return;
+  historyError.value = '';
+  historySuccess.value = '';
+
+  try {
+    const res = await fetch(`${API_BASE}/api-agent-versions-activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent_id: selectedAgent.value.id,
+        version_id: ver.id,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      historyError.value = data.error || 'Failed to revert version';
+      return;
+    }
+
+    historySuccess.value = `Reverted to v${ver.version_number}. Settings updated.`;
+    await Promise.all([fetchVersions(selectedAgent.value.id), fetchAgents()]);
+
+    const updated = agents.value.find((a: AgentRecord) => a.id === selectedAgent.value!.id);
+    if (updated) selectedAgent.value = updated;
+  } catch {
+    historyError.value = 'Network error. Please try again.';
   }
 }
 
 function formatDate(iso: string): string {
   if (!iso) return '';
-  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 onMounted(async () => {
@@ -614,7 +1190,7 @@ onMounted(async () => {
     listLoading.value = false;
     return;
   }
-  await fetchAgents();
+  await Promise.all([fetchAgents(), fetchAiProviders()]);
   listLoading.value = false;
 });
 </script>

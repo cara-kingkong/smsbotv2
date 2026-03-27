@@ -1,0 +1,21 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import AgentDirectory from '@components/AgentDirectory.vue';
+---
+
+<BaseLayout title="Agents">
+  <div class="page-header">
+    <div class="page-header-row">
+      <div>
+        <p class="page-kicker">Agent Builder</p>
+        <h1 class="page-title">Agents</h1>
+        <p class="page-subtitle">
+          View all AI agents across your campaigns. Create new agents, edit prompts, and manage versions from one place.
+        </p>
+      </div>
+      <div class="page-badge">All workspace agents</div>
+    </div>
+  </div>
+
+  <AgentDirectory client:load />
+</BaseLayout>

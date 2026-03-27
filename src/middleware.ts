@@ -38,17 +38,18 @@ export const onRequest = defineMiddleware(async ({ cookies, url, redirect, local
       }
 
       // Update cookies with fresh tokens
+      const isSecure = url.protocol === 'https:';
       cookies.set('sb-access-token', refreshData.session.access_token, {
         path: '/',
         httpOnly: true,
-        secure: true,
+        secure: isSecure,
         sameSite: 'lax',
         maxAge: 60 * 60,
       });
       cookies.set('sb-refresh-token', refreshData.session.refresh_token, {
         path: '/',
         httpOnly: true,
-        secure: true,
+        secure: isSecure,
         sameSite: 'lax',
         maxAge: 60 * 60 * 24 * 7,
       });

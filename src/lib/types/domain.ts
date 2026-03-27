@@ -93,6 +93,7 @@ export interface Agent {
   id: string;
   campaign_id: string;
   name: string;
+  description: string | null;
   status: EntityStatus;
   ai_provider_integration_id: string | null;
   weight: number;
@@ -107,6 +108,16 @@ export interface ReplyCadence {
   max_followups: number;
 }
 
+export interface AllowedActions {
+  can_book: boolean;
+  can_escalate_to_human: boolean;
+  can_close_unqualified: boolean;
+}
+
+export interface QualificationRules {
+  required_fields: string[];
+}
+
 export interface AgentVersion {
   id: string;
   agent_id: string;
@@ -114,6 +125,8 @@ export interface AgentVersion {
   prompt_text: string;
   system_rules_json: Record<string, unknown>;
   reply_cadence_json: ReplyCadence;
+  allowed_actions_json: AllowedActions;
+  qualification_rules_json: QualificationRules;
   config_json: Record<string, unknown>;
   is_active: boolean;
   created_at: string;

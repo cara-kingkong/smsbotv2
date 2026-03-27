@@ -38,9 +38,10 @@ const publicConfig = getPublicSupabaseConfig();
           return;
         }
 
-        // Set cookies for SSR auth
-        document.cookie = `sb-access-token=${data.session.access_token}; path=/; max-age=3600; SameSite=Lax; Secure`;
-        document.cookie = `sb-refresh-token=${data.session.refresh_token}; path=/; max-age=604800; SameSite=Lax; Secure`;
+        // Set cookies for SSR auth — only add Secure flag when on HTTPS
+        const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie = `sb-access-token=${data.session.access_token}; path=/; max-age=3600; SameSite=Lax${secure}`;
+        document.cookie = `sb-refresh-token=${data.session.refresh_token}; path=/; max-age=604800; SameSite=Lax${secure}`;
 
         window.location.href = '/dashboard';
       }

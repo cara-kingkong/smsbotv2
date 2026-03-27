@@ -5,8 +5,17 @@ import { EntityStatus } from '@lib/types';
 export interface CreateAgentInput {
   campaign_id: string;
   name: string;
+  description?: string;
   weight?: number;
   ai_provider_integration_id?: string;
+}
+
+export interface UpdateAgentInput {
+  agent_id: string;
+  name?: string;
+  description?: string;
+  weight?: number;
+  status?: string;
 }
 
 export interface CreateAgentVersionInput {
@@ -14,6 +23,8 @@ export interface CreateAgentVersionInput {
   prompt_text: string;
   system_rules_json?: Record<string, unknown>;
   reply_cadence_json?: Record<string, unknown>;
+  allowed_actions_json?: Record<string, unknown>;
+  qualification_rules_json?: Record<string, unknown>;
   config_json?: Record<string, unknown>;
 }
 
@@ -21,19 +32,84 @@ export class AgentService {
   constructor(private readonly db: SupabaseClient) {}
 
   async create(input: CreateAgentInput): Promise<Agent> {
+    // Build insert payload — only include optional columns if they have values,
+    // so the insert works whether or not the migration has run yet.
+    const row: Record<string, unknown> = {
+      campaign_id: input.campaign_id,
+      name: input.name,
+      status: EntityStatus.Active,
+      weight: input.weight ?? 1,
+      ai_provider_integration_id: input.ai_provider_integration_id ?? null,
+    };
+
+    // Try to resolve workspace_id from campaign (needed after migration 006)
+    const { data: campaign } = await this.db
+      .from('campaigns')
+      .select('workspace_id')
+      .eq('id', input.campaign_id)
+      .single();
+
+    if (campaign?.workspace_id) {
+      row.workspace_id = campaign.workspace_id;
+    }
+    if (input.description) {
+      row.description = input.description;
+    }
+
     const { data, error } = await this.db
       .from('agents')
-      .insert({
-        campaign_id: input.campaign_id,
-        name: input.name,
-        status: EntityStatus.Active,
-        weight: input.weight ?? 1,
-        ai_provider_integration_id: input.ai_provider_integration_id ?? null,
-      })
+      .insert(row)
       .select()
       .single();
 
+    // If it fails because of missing columns, retry without them
+    if (error?.message?.includes('column') && (error.message.includes('workspace_id') || error.message.includes('description'))) {
+      delete row.workspace_id;
+      delete row.description;
+      const { data: retryData, error: retryErr } = await this.db
+        .from('agents')
+        .insert(row)
+        .select()
+        .single();
+      if (retryErr) throw new Error(`Failed to create agent: ${retryErr.message}`);
+      return retryData;
+    }
+
     if (error) throw new Error(`Failed to create agent: ${error.message}`);
+    return data;
+  }
+
+  async update(input: UpdateAgentInput): Promise<Agent> {
+    const updates: Record<string, unknown> = {};
+    if (input.name !== undefined) updates.name = input.name;
+    if (input.description !== undefined) updates.description = input.description;
+    if (input.weight !== undefined) updates.weight = input.weight;
+    if (input.status !== undefined) updates.status = input.status;
+    updates.updated_at = new Date().toISOString();
+
+    const { data, error } = await this.db
+      .from('agents')
+      .update(updates)
+      .eq('id', input.agent_id)
+      .select()
+      .single();
+
+    if (error) throw new Error(`Failed to update agent: ${error.message}`);
+    return data;
+  }
+
+  async archive(agentId: string): Promise<Agent> {
+    const { data, error } = await this.db
+      .from('agents')
+      .update({
+        status: EntityStatus.Archived,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', agentId)
+      .select()
+      .single();
+
+    if (error) throw new Error(`Failed to archive agent: ${error.message}`);
     return data;
   }
 
@@ -43,19 +119,48 @@ export class AgentService {
       .select('*')
       .eq('campaign_id', campaignId)
       .is('deleted_at', null)
-      .eq('status', EntityStatus.Active);
+      .order('created_at', { ascending: true });
 
     if (error) throw new Error(`Failed to list agents: ${error.message}`);
     return data ?? [];
   }
 
+  async listByWorkspace(workspaceId: string): Promise<(Agent & { campaign_name?: string })[]> {
+    // Join through campaigns to filter by workspace_id (works whether or not
+    // agents.workspace_id column exists yet — the FK is on campaign_id)
+    const { data, error } = await this.db
+      .from('agents')
+      .select('*, campaigns!inner(name, workspace_id)')
+      .eq('campaigns.workspace_id', workspaceId)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false });
+
+    if (error) throw new Error(`Failed to list workspace agents: ${error.message}`);
+
+    return (data ?? []).map((row: Record<string, unknown>) => {
+      const campaigns = row.campaigns as { name: string; workspace_id: string } | null;
+      return {
+        ...row,
+        campaign_name: campaigns?.name ?? 'Unknown',
+        campaigns: undefined,
+      };
+    }) as (Agent & { campaign_name?: string })[];
+  }
+
   /** Weighted random selection among active agents in a campaign */
   async selectForConversation(campaignId: string): Promise<{ agent: Agent; version: AgentVersion }> {
-    const agents = await this.listByCampaign(campaignId);
-    if (agents.length === 0) throw new Error('No active agents for campaign');
+    const { data: agents, error } = await this.db
+      .from('agents')
+      .select('*')
+      .eq('campaign_id', campaignId)
+      .eq('status', EntityStatus.Active)
+      .is('deleted_at', null);
+
+    if (error) throw new Error(`Failed to list agents: ${error.message}`);
+    if (!agents || agents.length === 0) throw new Error('No active agents for campaign');
 
     // Weighted random pick
-    const totalWeight = agents.reduce((sum, a) => sum + a.weight, 0);
+    const totalWeight = agents.reduce((sum: number, a: Agent) => sum + a.weight, 0);
     let random = Math.random() * totalWeight;
     let selected = agents[0];
     for (const agent of agents) {
@@ -86,6 +191,17 @@ export class AgentService {
     return data;
   }
 
+  async listVersions(agentId: string): Promise<AgentVersion[]> {
+    const { data, error } = await this.db
+      .from('agent_versions')
+      .select('*')
+      .eq('agent_id', agentId)
+      .order('version_number', { ascending: false });
+
+    if (error) throw new Error(`Failed to list versions: ${error.message}`);
+    return data ?? [];
+  }
+
   async createVersion(input: CreateAgentVersionInput): Promise<AgentVersion> {
     // Get next version number
     const { data: latest } = await this.db
@@ -104,25 +220,68 @@ export class AgentService {
       .update({ is_active: false })
       .eq('agent_id', input.agent_id);
 
+    const row: Record<string, unknown> = {
+      agent_id: input.agent_id,
+      version_number: nextVersion,
+      prompt_text: input.prompt_text,
+      system_rules_json: input.system_rules_json ?? {},
+      reply_cadence_json: input.reply_cadence_json ?? {
+        initial_delay_seconds: 30,
+        followup_delay_seconds: 3600,
+        max_followups: 5,
+      },
+      config_json: input.config_json ?? {},
+      is_active: true,
+    };
+
+    // New columns from migration 006 — include if provided
+    if (input.allowed_actions_json) {
+      row.allowed_actions_json = input.allowed_actions_json;
+    }
+    if (input.qualification_rules_json) {
+      row.qualification_rules_json = input.qualification_rules_json;
+    }
+
     const { data, error } = await this.db
       .from('agent_versions')
-      .insert({
-        agent_id: input.agent_id,
-        version_number: nextVersion,
-        prompt_text: input.prompt_text,
-        system_rules_json: input.system_rules_json ?? {},
-        reply_cadence_json: input.reply_cadence_json ?? {
-          initial_delay_seconds: 30,
-          followup_delay_seconds: 3600,
-          max_followups: 5,
-        },
-        config_json: input.config_json ?? {},
-        is_active: true,
-      })
+      .insert(row)
       .select()
       .single();
 
+    // If it fails because of missing columns, retry without them
+    if (error?.message?.includes('column') && (error.message.includes('allowed_actions') || error.message.includes('qualification_rules'))) {
+      delete row.allowed_actions_json;
+      delete row.qualification_rules_json;
+      const { data: retryData, error: retryErr } = await this.db
+        .from('agent_versions')
+        .insert(row)
+        .select()
+        .single();
+      if (retryErr) throw new Error(`Failed to create agent version: ${retryErr.message}`);
+      return retryData;
+    }
+
     if (error) throw new Error(`Failed to create agent version: ${error.message}`);
+    return data;
+  }
+
+  async activateVersion(agentId: string, versionId: string): Promise<AgentVersion> {
+    // Deactivate all versions for this agent
+    await this.db
+      .from('agent_versions')
+      .update({ is_active: false })
+      .eq('agent_id', agentId);
+
+    // Activate the specified version
+    const { data, error } = await this.db
+      .from('agent_versions')
+      .update({ is_active: true })
+      .eq('id', versionId)
+      .eq('agent_id', agentId)
+      .select()
+      .single();
+
+    if (error) throw new Error(`Failed to activate version: ${error.message}`);
     return data;
   }
 }
