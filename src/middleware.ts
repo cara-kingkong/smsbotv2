@@ -4,8 +4,13 @@ import { getSupabaseClient } from '@lib/db/client';
 /** Routes that do NOT require authentication */
 const PUBLIC_ROUTES = ['/login', '/auth/callback'];
 
+/** Route prefixes for internal server-to-server calls (no auth needed) */
+const INTERNAL_PREFIXES = ['/api/process-', '/api/webhook-'];
+
 function isPublic(pathname: string): boolean {
-  return PUBLIC_ROUTES.some((route) => pathname === route || pathname.startsWith(route + '/'));
+  if (PUBLIC_ROUTES.some((route) => pathname === route || pathname.startsWith(route + '/'))) return true;
+  if (INTERNAL_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return true;
+  return false;
 }
 
 function hasOAuthCallbackParams(url: URL): boolean {

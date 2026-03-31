@@ -12,8 +12,9 @@
 
 [dev]
   command = "npm run dev"
-  port = 4321
+  port = 8888
   targetPort = 4321
+  envFiles = [".env"]
 
 # Environment variable placeholders — set in Netlify UI or .env
 # SUPABASE_URL

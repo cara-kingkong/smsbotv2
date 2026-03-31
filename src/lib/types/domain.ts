@@ -195,6 +195,7 @@ export interface Conversation {
 export interface Message {
   id: string;
   conversation_id: string;
+  source_job_id: string | null;
   direction: MessageDirection;
   sender_type: SenderType;
   body_text: string;
@@ -253,8 +254,14 @@ export interface Job {
   payload_json: Record<string, unknown>;
   attempts: number;
   max_attempts: number;
+  started_at: string | null;
+  heartbeat_at: string | null;
+  lease_expires_at: string | null;
+  completed_at: string | null;
+  worker_id: string | null;
   run_at: string;
   last_error: string | null;
+  last_error_at: string | null;
   dead_lettered_at: string | null;
   created_at: string;
 }

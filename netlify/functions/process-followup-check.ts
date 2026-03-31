@@ -1,7 +1,11 @@
-import type { Context } from '@netlify/functions';
+import type { Config, Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { QueueService } from '../../src/lib/queues/service';
 import { JobStatus } from '../../src/lib/types';
+
+export const config: Config = {
+  schedule: '*/5 * * * *',
+};
 
 /**
  * Safety-net scheduled function: finds conversations stuck in "waiting_for_lead"

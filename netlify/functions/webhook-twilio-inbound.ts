@@ -22,6 +22,8 @@ export default async (req: Request, _context: Context) => {
     process.env.TWILIO_AUTH_TOKEN!,
   );
   let receiptId: string | null = null;
+  let receiptWorkspaceId: string | null = null;
+  let receiptKey: string | null = null;
 
   try {
     const bodyText = await req.text();
@@ -52,6 +54,9 @@ export default async (req: Request, _context: Context) => {
       });
     }
 
+    receiptWorkspaceId = lead.workspace_id;
+    receiptKey = inbound.provider_message_id;
+
     const { data: receipt, error: receiptError } = await db
       .from('webhook_receipts')
       .insert({
@@ -67,8 +72,36 @@ export default async (req: Request, _context: Context) => {
 
     if (receiptError) {
       if (receiptError.code === '23505' || receiptError.message.includes('duplicate key')) {
+        const { data: existingMessage } = await db
+          .from('messages')
+          .select('id')
+          .eq('provider_message_id', inbound.provider_message_id)
+          .limit(1)
+          .single();
+
+        if (existingMessage) {
+          return new Response('<Response></Response>', {
+            status: 200,
+            headers: { 'Content-Type': 'text/xml' },
+          });
+        }
+
+        const { data: existingReceipt } = await db
+          .from('webhook_receipts')
+          .select('processed_status')
+          .eq('workspace_id', lead.workspace_id)
+          .eq('idempotency_key', inbound.provider_message_id)
+          .single();
+
+        if (existingReceipt?.processed_status === 'completed') {
+          return new Response('<Response></Response>', {
+            status: 200,
+            headers: { 'Content-Type': 'text/xml' },
+          });
+        }
+
         return new Response('<Response></Response>', {
-          status: 200,
+          status: 500,
           headers: { 'Content-Type': 'text/xml' },
         });
       }
@@ -204,9 +237,19 @@ export default async (req: Request, _context: Context) => {
       } catch (receiptErr) {
         console.warn('Failed to mark Twilio webhook receipt as failed:', receiptErr);
       }
+    } else if (receiptWorkspaceId && receiptKey) {
+      try {
+        await db
+          .from('webhook_receipts')
+          .update({ processed_status: 'failed' })
+          .eq('workspace_id', receiptWorkspaceId)
+          .eq('idempotency_key', receiptKey);
+      } catch (receiptErr) {
+        console.warn('Failed to mark duplicate Twilio webhook receipt as failed:', receiptErr);
+      }
     }
     return new Response('<Response></Response>', {
-      status: 200,
+      status: 500,
       headers: { 'Content-Type': 'text/xml' },
     });
   }

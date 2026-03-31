@@ -1,5 +1,4 @@
 import type { Context } from '@netlify/functions';
-import { getServiceClient } from '../../src/lib/db/client';
 import { ConversationService } from '../../src/lib/conversations/service';
 import { MessagingService } from '../../src/lib/messaging/service';
 import { AIService } from '../../src/lib/ai/service';
@@ -8,30 +7,41 @@ import { LeadService } from '../../src/lib/leads/service';
 import { CampaignService } from '../../src/lib/campaigns/service';
 import { WorkspaceService } from '../../src/lib/workspaces/service';
 import { BookingService } from '../../src/lib/calendar/service';
-import { QueueService } from '../../src/lib/queues/service';
 import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
 import { OpenAIAdapter } from '../../src/lib/ai/adapters/openai';
 import { AnthropicAdapter } from '../../src/lib/ai/adapters/anthropic';
-import { ConversationStatus, ConversationOutcome, SenderType, CRMEventType, MessageDirection, ConversationEventType } from '../../src/lib/types';
+import {
+  ConversationStatus,
+  ConversationOutcome,
+  SenderType,
+  CRMEventType,
+  MessageDirection,
+  ConversationEventType,
+} from '../../src/lib/types';
 import { CRMService } from '../../src/lib/crm/service';
 import type { AIProviderAdapter } from '../../src/lib/types';
 import { isWithinBusinessHours, getNextBusinessHoursStart } from '../../src/lib/utils/business-hours';
 import { evaluateStopConditions } from '../../src/lib/utils/stop-conditions';
+import { runQueueJob } from '../../src/lib/queues/job-runner';
+
+interface ProcessAIReplyPayload {
+  conversation_id: string;
+  trigger?: string;
+  job_id?: string;
+  worker_id?: string;
+  lease_seconds?: number;
+}
 
 /**
  * Background function: Generate AI reply and send SMS.
  * Enforces business hours, stop conditions, and persists AI decisions.
  */
-export default async (req: Request, _context: Context) => {
-  const db = getServiceClient();
+export default async (req: Request, _context: Context) =>
+  runQueueJob<ProcessAIReplyPayload>(req, 'process-ai-reply-background', async (payload, context) => {
+    const { db, queueService, heartbeat, jobId } = context;
+    const { conversation_id, trigger } = payload;
 
-  try {
-    const { conversation_id, trigger } = await req.json() as {
-      conversation_id: string;
-      trigger?: string;
-    };
-
-    // ── Follow-up guard: skip if lead has replied since scheduling ──
+    // Follow-up guard: skip if lead has replied since scheduling.
     if (trigger === 'followup_scheduled') {
       const { data: latestMsg } = await db
         .from('messages')
@@ -43,7 +53,7 @@ export default async (req: Request, _context: Context) => {
 
       if (latestMsg?.direction === MessageDirection.Inbound) {
         console.log(`Follow-up skipped for ${conversation_id}: lead already replied`);
-        return new Response('Skipped — lead replied', { status: 200 });
+        return new Response('Skipped - lead replied', { status: 200 });
       }
     }
 
@@ -51,11 +61,10 @@ export default async (req: Request, _context: Context) => {
     const conversation = await conversationService.getById(conversation_id);
 
     if (!conversation) {
-      console.error(`Conversation not found: ${conversation_id}`);
-      return new Response('Not found', { status: 404 });
+      console.warn(`Conversation not found or deleted: ${conversation_id}`);
+      return new Response('Skipped', { status: 200 });
     }
 
-    // Skip if human-controlled or terminal
     if (
       conversation.human_controlled ||
       conversation.status === ConversationStatus.Completed ||
@@ -65,7 +74,6 @@ export default async (req: Request, _context: Context) => {
       return new Response('Skipped', { status: 200 });
     }
 
-    // Load dependencies
     const agentService = new AgentService(db);
     const leadService = new LeadService(db);
     const campaignService = new CampaignService(db);
@@ -86,11 +94,9 @@ export default async (req: Request, _context: Context) => {
     const campaign = await campaignService.getById(conversation.campaign_id);
     if (!campaign) throw new Error(`Campaign not found: ${conversation.campaign_id}`);
 
-    // ── Resolve workspace defaults for inheritance ─────────────
     const workspaceService = new WorkspaceService(db);
     const workspace = await workspaceService.getById(campaign.workspace_id);
 
-    // ── Resolve stop conditions (campaign override > workspace default) ──
     const hasCampaignStopConditions = campaign.stop_conditions_json?.max_messages !== undefined
       && Object.keys(campaign.stop_conditions_json).length > 0;
     const effectiveStopConditions = hasCampaignStopConditions
@@ -99,10 +105,8 @@ export default async (req: Request, _context: Context) => {
         ? workspace.stop_conditions_json as typeof campaign.stop_conditions_json
         : { max_messages: 50, max_days: 14, max_no_reply_hours: 72 };
 
-    // ── Stop conditions check ──────────────────────────────────
     const stopResult = await evaluateStopConditions(db, conversation, effectiveStopConditions);
     if (stopResult.should_stop) {
-      console.log(`Conversation ${conversation_id} stopped: ${stopResult.reason}`);
       await conversationService.setOutcome(conversation_id, ConversationOutcome.NoResponse);
       await conversationService.updateStatus(conversation_id, ConversationStatus.Completed);
       await db.from('conversation_events').insert({
@@ -113,21 +117,16 @@ export default async (req: Request, _context: Context) => {
       return new Response('Stopped', { status: 200 });
     }
 
-    // ── Resolve business hours (campaign override > workspace default) ──
     let effectiveBusinessHours = campaign.business_hours_json;
     const hasCampaignHours = effectiveBusinessHours?.schedule?.length > 0;
-
     if (!hasCampaignHours && workspace?.business_hours_json && 'schedule' in workspace.business_hours_json) {
       effectiveBusinessHours = workspace.business_hours_json as typeof effectiveBusinessHours;
     }
 
-    // ── Business hours check ───────────────────────────────────
     const hasBusinessHours = effectiveBusinessHours?.schedule?.length > 0;
     if (hasBusinessHours && !isWithinBusinessHours(effectiveBusinessHours, lead.timezone)) {
       const nextOpen = getNextBusinessHoursStart(effectiveBusinessHours, lead.timezone);
       if (nextOpen) {
-        // Re-queue for next business hours window
-        const queueService = new QueueService(db);
         await queueService.enqueue({
           workspace_id: conversation.workspace_id,
           job_type: 'generate_ai_reply',
@@ -136,26 +135,21 @@ export default async (req: Request, _context: Context) => {
           run_at: nextOpen,
         });
         await conversationService.updateStatus(conversation_id, ConversationStatus.PausedBusinessHours);
-        console.log(`Conversation ${conversation_id} deferred to business hours: ${nextOpen.toISOString()}`);
         return new Response('Deferred', { status: 200 });
       }
     }
 
-    // Get message history
+    await heartbeat();
     const history = await messagingService.getHistory(conversation_id);
 
-    // Determine AI provider
     const aiAdapters = new Map<string, AIProviderAdapter>();
     if (process.env.OPENAI_API_KEY) aiAdapters.set('openai', new OpenAIAdapter(process.env.OPENAI_API_KEY));
     if (process.env.ANTHROPIC_API_KEY) aiAdapters.set('anthropic', new AnthropicAdapter(process.env.ANTHROPIC_API_KEY));
 
     const aiService = new AIService(db, aiAdapters);
-
-    // Get calendars for agent
     const bookingService = new BookingService(db, null as never);
     const calendars = await bookingService.getCalendarsForAgent(conversation.agent_id);
 
-    // Resolve AI provider from integration, fallback to default
     let providerKey = 'openai';
     if (version.config_json && typeof version.config_json === 'object' && 'provider' in version.config_json) {
       providerKey = version.config_json.provider as string;
@@ -164,7 +158,7 @@ export default async (req: Request, _context: Context) => {
       providerKey = aiAdapters.keys().next().value ?? 'openai';
     }
 
-    // Generate AI decision
+    await heartbeat();
     const decision = await aiService.generateReply({
       agent_version: version,
       conversation_history: history,
@@ -173,7 +167,6 @@ export default async (req: Request, _context: Context) => {
       provider_key: providerKey,
     });
 
-    // ── Persist AI decision to ai_decisions table ──────────────
     await db.from('ai_decisions').insert({
       workspace_id: conversation.workspace_id,
       conversation_id,
@@ -183,15 +176,15 @@ export default async (req: Request, _context: Context) => {
         history_length: history.length,
         lead_timezone: lead.timezone,
         available_calendars: calendars.length,
+        queue_job_id: jobId ?? null,
       },
       decision_json: decision,
       raw_response_json: decision,
     });
 
-    // Log AI decision event
     await db.from('conversation_events').insert({
       conversation_id,
-      event_type: 'ai_reply_generated',
+      event_type: ConversationEventType.AIReplyGenerated,
       event_payload_json: {
         should_reply: decision.should_reply,
         qualification_state: decision.qualification_state,
@@ -200,23 +193,22 @@ export default async (req: Request, _context: Context) => {
       },
     });
 
-    // Handle escalation
     if (decision.escalate_to_human) {
       await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
       return new Response('Escalated', { status: 200 });
     }
 
-    // Send reply if AI says to
     if (decision.should_reply && decision.reply_text) {
+      await heartbeat();
       const message = await messagingService.sendOutbound({
         conversation_id,
         to: lead.phone_e164,
         from: process.env.TWILIO_PHONE_NUMBER!,
         body_text: decision.reply_text,
         sender_type: SenderType.AI,
+        source_job_id: jobId,
       });
 
-      // Link message to AI decision
       await db.from('ai_decisions')
         .update({ message_id: message.id })
         .eq('conversation_id', conversation_id)
@@ -226,18 +218,16 @@ export default async (req: Request, _context: Context) => {
 
       await conversationService.updateStatus(conversation_id, ConversationStatus.WaitingForLead);
 
-      // ── Schedule follow-up if under max_followups limit ─────────
       const cadence = version.reply_cadence_json;
       if (cadence && cadence.max_followups > 0 && cadence.followup_delay_seconds > 0) {
         const { count: followupCount } = await db
           .from('conversation_events')
           .select('*', { count: 'exact', head: true })
           .eq('conversation_id', conversation_id)
-          .eq('event_type', 'ai_reply_generated');
+          .eq('event_type', ConversationEventType.AIReplyGenerated);
 
         if ((followupCount ?? 0) < cadence.max_followups) {
           const followupRunAt = new Date(Date.now() + cadence.followup_delay_seconds * 1000);
-          const queueService = new QueueService(db);
           await queueService.enqueue({
             workspace_id: conversation.workspace_id,
             job_type: 'generate_ai_reply',
@@ -246,16 +236,11 @@ export default async (req: Request, _context: Context) => {
             run_at: followupRunAt,
             max_attempts: 1,
           });
-          console.log(
-            `Follow-up ${(followupCount ?? 0) + 1}/${cadence.max_followups} scheduled for ${conversation_id} at ${followupRunAt.toISOString()}`
-          );
         }
       }
     }
 
-    // Handle booking recommendation
     if (decision.should_book && decision.recommended_calendar_id) {
-      const queueService = new QueueService(db);
       await queueService.enqueue({
         workspace_id: conversation.workspace_id,
         job_type: 'process_booking',
@@ -269,7 +254,6 @@ export default async (req: Request, _context: Context) => {
       });
     }
 
-    // Emit CRM events for qualification state changes and escalation
     const crmEventType =
       decision.qualification_state === 'qualified'
         ? CRMEventType.ConversationQualified
@@ -310,8 +294,7 @@ export default async (req: Request, _context: Context) => {
           },
         });
 
-        const crmQueueService = new QueueService(db);
-        await crmQueueService.enqueue({
+        await queueService.enqueue({
           workspace_id: conversation.workspace_id,
           job_type: 'process_crm_sync',
           queue_name: 'crm',
@@ -321,8 +304,4 @@ export default async (req: Request, _context: Context) => {
     }
 
     return new Response('OK', { status: 200 });
-  } catch (err) {
-    console.error('process-ai-reply-background error:', err);
-    return new Response('Error', { status: 500 });
-  }
-};
+  });

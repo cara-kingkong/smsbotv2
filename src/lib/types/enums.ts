@@ -77,6 +77,7 @@ export enum JobStatus {
   Completed = 'completed',
   Failed = 'failed',
   DeadLettered = 'dead_lettered',
+  Cancelled = 'cancelled',
 }
 
 /** CRM outcome event types */

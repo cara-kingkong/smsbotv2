@@ -29,6 +29,7 @@ const handlers: Record<string, (req: Request, ctx: unknown) => Promise<Response>
   'api-inbox-reply': (await import('../../../netlify/functions/api-inbox-reply')).default,
   'api-inbox-takeover': (await import('../../../netlify/functions/api-inbox-takeover')).default,
   'api-inbox-release': (await import('../../../netlify/functions/api-inbox-release')).default,
+  'api-inbox-delete': (await import('../../../netlify/functions/api-inbox-delete')).default,
   'api-dashboard-stats': (await import('../../../netlify/functions/api-dashboard-stats')).default,
   'api-jobs-list': (await import('../../../netlify/functions/api-jobs-list')).default,
   'api-jobs-retry': (await import('../../../netlify/functions/api-jobs-retry')).default,
@@ -40,6 +41,13 @@ const handlers: Record<string, (req: Request, ctx: unknown) => Promise<Response>
   'api-reporting-workspace': (await import('../../../netlify/functions/api-reporting-workspace')).default,
   'api-workspace-settings-get': (await import('../../../netlify/functions/api-workspace-settings-get')).default,
   'api-workspace-settings-update': (await import('../../../netlify/functions/api-workspace-settings-update')).default,
+  'webhook-start-conversation': (await import('../../../netlify/functions/webhook-start-conversation')).default,
+  'process-queue': (await import('../../../netlify/functions/process-queue')).default,
+  'process-followup-check': (await import('../../../netlify/functions/process-followup-check')).default,
+  'process-ai-reply-background': (await import('../../../netlify/functions/process-ai-reply-background')).default,
+  'process-send-sms-background': (await import('../../../netlify/functions/process-send-sms-background')).default,
+  'process-booking-background': (await import('../../../netlify/functions/process-booking-background')).default,
+  'process-crm-sync-background': (await import('../../../netlify/functions/process-crm-sync-background')).default,
 };
 
 const handle: APIRoute = async ({ params, request }) => {

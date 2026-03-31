@@ -589,6 +589,7 @@ Stores inbound and outbound messages for a conversation.
 - `id` uuid pk
 - `workspace_id` uuid not null references `workspaces(id)`
 - `conversation_id` uuid not null references `conversations(id)`
+- `source_job_id` uuid null references `jobs(id)`
 - `direction` message_direction not null
 - `sender_type` message_sender_type not null
 - `body_text` text not null
@@ -609,7 +610,8 @@ Stores inbound and outbound messages for a conversation.
 - index on `workspace_id`
 - index on `conversation_id`
 - index on (`conversation_id`, `created_at`)
-- index on `provider_message_id` where `provider_message_id is not null`
+- unique index on `source_job_id` where `source_job_id is not null`
+- unique index on `provider_message_id` where `provider_message_id is not null`
 - index on (`workspace_id`, `delivery_status`)
 
 ---
@@ -797,7 +799,13 @@ Stores async jobs for queue-backed workflows.
 - `attempts` integer not null default 0
 - `max_attempts` integer not null default 3
 - `run_at` timestamptz not null default now()
+- `started_at` timestamptz null
+- `heartbeat_at` timestamptz null
+- `lease_expires_at` timestamptz null
+- `completed_at` timestamptz null
+- `worker_id` text null
 - `last_error` text null
+- `last_error_at` timestamptz null
 - `dead_lettered_at` timestamptz null
 - `created_at` timestamptz not null default now()
 
@@ -812,8 +820,13 @@ Stores async jobs for queue-backed workflows.
 
 ## Suggested Indexes
 - index on `workspace_id`
-- index on (`status`, `run_at`)
-- index on `queue_name`
+- index on (`queue_name`, `status`, `run_at`, `lease_expires_at`)
+- index on (`worker_id`, `status`, `lease_expires_at`) where `worker_id is not null`
+
+## Operational Notes
+- Queue workers should claim jobs with a lease and refresh `heartbeat_at` while long-running work is in progress.
+- A running job whose `lease_expires_at` has passed may be reclaimed by another worker.
+- Retryable failures should move the job back to `pending` with a future `run_at` rather than leaving it stuck in `running`.
 
 ---
 

@@ -45,6 +45,7 @@ export class CRMService {
       .single();
 
     if (!event) throw new Error(`CRM event not found: ${eventId}`);
+    if (event.status === CRMSyncStatus.Sent) return;
 
     const adapter = this.adapters.get(providerKey);
     if (!adapter) throw new Error(`No CRM adapter for: ${providerKey}`);

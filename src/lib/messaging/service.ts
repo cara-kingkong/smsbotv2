@@ -15,35 +15,97 @@ export class MessagingService {
     private readonly smsAdapter: SMSAdapter,
   ) {}
 
+  async queueOutbound(input: {
+    conversation_id: string;
+    body_text: string;
+    sender_type: SenderType;
+    source_job_id?: string;
+  }): Promise<Message> {
+    if (input.source_job_id) {
+      const { data: existing } = await this.db
+        .from('messages')
+        .select('*')
+        .eq('source_job_id', input.source_job_id)
+        .single();
+
+      if (existing) return existing;
+    }
+
+    const { data: message, error: insertError } = await this.db
+      .from('messages')
+      .insert({
+        conversation_id: input.conversation_id,
+        source_job_id: input.source_job_id ?? null,
+        direction: MessageDirection.Outbound,
+        sender_type: input.sender_type,
+        body_text: input.body_text,
+        provider_status: 'queued',
+      })
+      .select()
+      .single();
+
+    if (insertError) throw new Error(`Failed to persist queued message: ${insertError.message}`);
+
+    await this.db
+      .from('conversations')
+      .update({ last_activity_at: new Date().toISOString() })
+      .eq('id', input.conversation_id);
+
+    return message;
+  }
+
   async sendOutbound(input: {
     conversation_id: string;
     to: string;
     from: string;
     body_text: string;
     sender_type: SenderType;
+    source_job_id?: string;
   }): Promise<Message> {
-    // Persist message record first
-    const { data: message, error: insertError } = await this.db
+    const message = await this.queueOutbound({
+      conversation_id: input.conversation_id,
+      body_text: input.body_text,
+      sender_type: input.sender_type,
+      source_job_id: input.source_job_id,
+    });
+
+    return this.dispatchQueuedOutbound({
+      message_id: message.id,
+      to: input.to,
+      from: input.from,
+    });
+  }
+
+  async dispatchQueuedOutbound(input: {
+    message_id: string;
+    to: string;
+    from: string;
+  }): Promise<Message> {
+    const { data: message, error: fetchError } = await this.db
       .from('messages')
-      .insert({
-        conversation_id: input.conversation_id,
-        direction: MessageDirection.Outbound,
-        sender_type: input.sender_type,
-        body_text: input.body_text,
-        sent_at: new Date().toISOString(),
-      })
-      .select()
+      .select('*')
+      .eq('id', input.message_id)
       .single();
 
-    if (insertError) throw new Error(`Failed to persist message: ${insertError.message}`);
+    if (fetchError || !message) {
+      throw new Error(`Failed to load message ${input.message_id}: ${fetchError?.message ?? 'Not found'}`);
+    }
+
+    if (message.direction !== MessageDirection.Outbound) {
+      throw new Error(`Message ${input.message_id} is not outbound`);
+    }
+
+    if (message.provider_message_id) {
+      return message;
+    }
 
     // Send via provider
     try {
       const result = await this.smsAdapter.sendMessage({
         to: input.to,
         from: input.from,
-        body: input.body_text,
-        conversation_id: input.conversation_id,
+        body: message.body_text,
+        conversation_id: message.conversation_id,
       });
 
       // Update with provider response
@@ -52,10 +114,16 @@ export class MessagingService {
         .update({
           provider_message_id: result.provider_message_id,
           provider_status: result.status,
+          sent_at: new Date().toISOString(),
         })
         .eq('id', message.id);
 
-      return { ...message, provider_message_id: result.provider_message_id, provider_status: result.status };
+      return {
+        ...message,
+        provider_message_id: result.provider_message_id,
+        provider_status: result.status,
+        sent_at: new Date().toISOString(),
+      };
     } catch (err) {
       // Log failure but don't lose the message record
       await this.db
@@ -79,6 +147,7 @@ export class MessagingService {
       .from('messages')
       .insert({
         conversation_id: input.conversation_id,
+        source_job_id: null,
         direction: MessageDirection.Inbound,
         sender_type: SenderType.Lead,
         body_text: input.body_text,
@@ -88,7 +157,19 @@ export class MessagingService {
       .select()
       .single();
 
-    if (error) throw new Error(`Failed to record inbound message: ${error.message}`);
+    if (error) {
+      if (error.code === '23505' || error.message.includes('duplicate key')) {
+        const { data: existing } = await this.db
+          .from('messages')
+          .select('*')
+          .eq('provider_message_id', input.provider_message_id)
+          .single();
+
+        if (existing) return existing;
+      }
+
+      throw new Error(`Failed to record inbound message: ${error.message}`);
+    }
 
     // Update conversation last_activity_at
     await this.db

@@ -28,6 +28,7 @@
 
       <div class="flex-1 overflow-y-auto px-3 py-3">
         <div v-if="loading" class="empty-state min-h-full">Loading conversations...</div>
+        <div v-else-if="loadError" class="empty-state min-h-full">{{ loadError }}</div>
         <div v-else-if="conversations.length === 0" class="empty-state min-h-full">
           No conversations found{{ currentFilter ? ' for this filter' : '' }}.
         </div>
@@ -95,6 +96,13 @@
               >
                 {{ actionLoading ? 'Taking over...' : 'Take Over' }}
               </button>
+              <button
+                class="button-secondary !text-red-600 hover:!bg-red-50"
+                :disabled="actionLoading"
+                @click="confirmDelete"
+              >
+                {{ actionLoading ? 'Deleting...' : 'Delete' }}
+              </button>
             </div>
           </div>
         </div>
@@ -111,6 +119,7 @@
           style="background: linear-gradient(180deg, rgba(255,255,255,0.42), rgba(245,247,244,0.78));"
         >
           <div v-if="messagesLoading" class="empty-state min-h-full">Loading messages...</div>
+          <div v-else-if="messagesError" class="empty-state min-h-full">{{ messagesError }}</div>
           <div v-else-if="messages.length === 0" class="empty-state min-h-full">No messages yet.</div>
           <div v-else class="flex flex-col gap-3">
             <div
@@ -206,11 +215,13 @@ const filters = [
 
 const loading = ref(true);
 const conversations = ref<Conv[]>([]);
+const loadError = ref('');
 const currentFilter = ref('');
 const selectedId = ref<string | null>(null);
 const selected = ref<Conv | null>(null);
 const messages = ref<Msg[]>([]);
 const messagesLoading = ref(false);
+const messagesError = ref('');
 const replyText = ref('');
 const sendLoading = ref(false);
 const actionLoading = ref(false);
@@ -256,6 +267,8 @@ function statusClass(status: string): string {
     needs_human: 'bg-amber-50 text-amber-700',
     human_controlled: 'bg-sky-50 text-sky-700',
     waiting_for_lead: 'bg-slate-100 text-slate-600',
+    paused_business_hours: 'bg-indigo-50 text-indigo-700',
+    paused_manual: 'bg-orange-50 text-orange-700',
     completed: 'bg-slate-100 text-slate-600',
     opted_out: 'bg-rose-50 text-rose-700',
     queued: 'bg-slate-100 text-slate-600',
@@ -313,15 +326,31 @@ function resolveWorkspace(): string | null {
 
 async function fetchConversations() {
   if (!workspaceId) return;
+  loadError.value = '';
   const params = new URLSearchParams({ workspace_id: workspaceId });
   if (currentFilter.value) params.set('status', currentFilter.value);
   const res = await fetch(`${API_BASE}/api-inbox-list?${params}`);
-  if (res.ok) conversations.value = await res.json();
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: 'Failed to load conversations' }));
+    conversations.value = [];
+    loadError.value = body.error ?? 'Failed to load conversations';
+    return;
+  }
+
+  conversations.value = await res.json();
 }
 
 async function fetchMessages(convId: string) {
+  messagesError.value = '';
   const res = await fetch(`${API_BASE}/api-inbox-messages?conversation_id=${convId}`);
-  if (res.ok) messages.value = await res.json();
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: 'Failed to load messages' }));
+    messages.value = [];
+    messagesError.value = body.error ?? 'Failed to load messages';
+    return;
+  }
+
+  messages.value = await res.json();
 }
 
 function scrollToBottom() {
@@ -342,6 +371,7 @@ async function select(conv: Conv) {
   selectedId.value = conv.id;
   selected.value = conv;
   messagesLoading.value = true;
+  messagesError.value = '';
   await fetchMessages(conv.id);
   messagesLoading.value = false;
   scrollToBottom();
@@ -375,6 +405,25 @@ async function release() {
     await fetchConversations();
     const updated = conversations.value.find((c) => c.id === selectedId.value);
     if (updated) selected.value = updated;
+  }
+  actionLoading.value = false;
+}
+
+async function confirmDelete() {
+  if (!selected.value) return;
+  const name = leadName(selected.value);
+  if (!window.confirm(`Delete conversation with ${name}? This cannot be undone.`)) return;
+  actionLoading.value = true;
+  const res = await fetch(`${API_BASE}/api-inbox-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conversation_id: selected.value.id }),
+  });
+  if (res.ok) {
+    selectedId.value = null;
+    selected.value = null;
+    messages.value = [];
+    await fetchConversations();
   }
   actionLoading.value = false;
 }

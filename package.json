@@ -14,7 +14,8 @@
     "db:reset": "supabase db reset",
     "db:seed": "tsx supabase/seed/index.ts",
     "netlify:dev": "netlify dev",
-    "tunnel": "cloudflared --loglevel info tunnel --config ./cloudflared.yml run 2>&1 | tee -a cloudflared.log"
+    "tunnel": "cloudflared --loglevel info tunnel --config ./cloudflared.yml run 2>&1 | tee -a cloudflared.log",
+    "queue": "tsx scripts/queue-worker.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

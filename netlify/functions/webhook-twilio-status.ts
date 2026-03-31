@@ -1,5 +1,6 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
+import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
 
 /**
  * Twilio delivery status callback.
@@ -11,10 +12,19 @@ export default async (req: Request, _context: Context) => {
   }
 
   const db = getServiceClient();
+  const twilioAdapter = new TwilioAdapter(
+    process.env.TWILIO_ACCOUNT_SID!,
+    process.env.TWILIO_AUTH_TOKEN!,
+  );
 
   try {
     const bodyText = await req.text();
-    const body = Object.fromEntries(new URLSearchParams(bodyText));
+    const body = Object.fromEntries(new URLSearchParams(bodyText)) as Record<string, string>;
+
+    const isValid = twilioAdapter.validateWebhookSignature(req.url, req.headers, body);
+    if (!isValid) {
+      return new Response('Unauthorized', { status: 401 });
+    }
 
     const messageSid = body.MessageSid as string;
     const messageStatus = body.MessageStatus as string;

@@ -12,11 +12,12 @@ export class TwilioAdapter implements SMSAdapter {
   }
 
   async sendMessage(input: SendMessageInput): Promise<SendMessageResult> {
+    const statusCallback = resolveStatusCallbackUrl();
     const message = await this.client.messages.create({
       to: input.to,
       from: input.from,
       body: input.body,
-      statusCallback: `${process.env.PUBLIC_SITE_URL}/.netlify/functions/webhook-twilio-status`,
+      ...(statusCallback ? { statusCallback } : {}),
     });
 
     return {
@@ -49,5 +50,27 @@ export class TwilioAdapter implements SMSAdapter {
   async getDeliveryStatus(providerMessageId: string): Promise<string> {
     const message = await this.client.messages(providerMessageId).fetch();
     return message.status;
+  }
+}
+
+function resolveStatusCallbackUrl(): string | null {
+  const baseUrl = process.env.TWILIO_STATUS_CALLBACK_BASE_URL ?? process.env.PUBLIC_SITE_URL;
+  if (!baseUrl) return null;
+
+  try {
+    const url = new URL(baseUrl);
+    const hostname = url.hostname.toLowerCase();
+    if (
+      hostname === 'localhost'
+      || hostname === '127.0.0.1'
+      || hostname === '0.0.0.0'
+      || hostname === '::1'
+    ) {
+      return null;
+    }
+
+    return new URL('/.netlify/functions/webhook-twilio-status', url).toString();
+  } catch {
+    return null;
   }
 }

@@ -100,6 +100,10 @@ export function getPublicSupabaseClient(): SupabaseClient {
     });
   }
 
-  _publicClient = createClient(supabaseUrl, supabaseAnonKey);
+  _publicClient = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      storageKey: 'sb-auth-token',
+    },
+  });
   return _publicClient;
 }

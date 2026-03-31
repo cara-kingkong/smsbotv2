@@ -3,6 +3,7 @@ import { getServiceClient } from '../../src/lib/db/client';
 import { ConversationService } from '../../src/lib/conversations/service';
 import { MessagingService } from '../../src/lib/messaging/service';
 import { LeadService } from '../../src/lib/leads/service';
+import { QueueService } from '../../src/lib/queues/service';
 import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
 import { ConversationStatus, SenderType, ConversationEventType } from '../../src/lib/types';
 import { sendManualMessageSchema } from '../../src/lib/utils/validation';
@@ -77,13 +78,24 @@ export default async (req: Request, _context: Context) => {
       process.env.TWILIO_AUTH_TOKEN!,
     );
     const messagingService = new MessagingService(db, twilioAdapter);
+    const queueService = new QueueService(db);
 
-    const message = await messagingService.sendOutbound({
+    const message = await messagingService.queueOutbound({
       conversation_id,
-      to: lead.phone_e164,
-      from: process.env.TWILIO_PHONE_NUMBER!,
       body_text,
       sender_type: SenderType.Human,
+    });
+
+    await queueService.enqueue({
+      workspace_id: conversation.workspace_id,
+      job_type: 'send_sms',
+      queue_name: 'sms',
+      payload: {
+        conversation_id,
+        message_id: message.id,
+        to: lead.phone_e164,
+        from: process.env.TWILIO_PHONE_NUMBER!,
+      },
     });
 
     // Log conversation event

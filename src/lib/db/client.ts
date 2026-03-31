@@ -10,8 +10,8 @@ let _serviceClient: SupabaseClient | null = null;
 export function getSupabaseClient(): SupabaseClient {
   if (_client) return _client;
 
-  const url = import.meta.env.SUPABASE_URL ?? process.env.SUPABASE_URL;
-  const anonKey = import.meta.env.SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
+  const url = process.env.SUPABASE_URL ?? process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
 
   if (!url || !anonKey) {
     throw new Error('Missing SUPABASE_URL or SUPABASE_ANON_KEY');
@@ -28,8 +28,8 @@ export function getSupabaseClient(): SupabaseClient {
 export function getServiceClient(): SupabaseClient {
   if (_serviceClient) return _serviceClient;
 
-  const url = import.meta.env.SUPABASE_URL ?? process.env.SUPABASE_URL;
-  const serviceKey = import.meta.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = process.env.SUPABASE_URL ?? process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!url || !serviceKey) {
     throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
@@ -43,8 +43,8 @@ export function getServiceClient(): SupabaseClient {
  * Create a per-request client with user's access token for SSR pages.
  */
 export function getAuthenticatedClient(accessToken: string): SupabaseClient {
-  const url = import.meta.env.SUPABASE_URL ?? process.env.SUPABASE_URL;
-  const anonKey = import.meta.env.SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
+  const url = process.env.SUPABASE_URL ?? process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
 
   if (!url || !anonKey) {
     throw new Error('Missing SUPABASE_URL or SUPABASE_ANON_KEY');

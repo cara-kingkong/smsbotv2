@@ -17,6 +17,7 @@ export default async (req: Request, _context: Context) => {
   }
 
   const db = getServiceClient();
+  let receiptContext: { workspaceId: string; idempotencyKey: string } | null = null;
 
   try {
     const payload = (await req.json()) as StartConversationWebhookPayload;
@@ -30,29 +31,42 @@ export default async (req: Request, _context: Context) => {
     }
 
     const idempotencyKey = payload.idempotency_key ?? nanoid();
+    receiptContext = { workspaceId: payload.workspace_id, idempotencyKey };
 
     // Check idempotency
     const { data: existing } = await db
       .from('webhook_receipts')
-      .select('id')
+      .select('id, processed_status')
       .eq('workspace_id', payload.workspace_id)
       .eq('idempotency_key', idempotencyKey)
       .limit(1)
       .single();
 
     if (existing) {
-      return new Response(JSON.stringify({ message: 'Already processed', idempotency_key: idempotencyKey }), { status: 200 });
-    }
+      if (existing.processed_status === 'completed') {
+        return new Response(JSON.stringify({ message: 'Already processed', idempotency_key: idempotencyKey }), { status: 200 });
+      }
 
-    // Store raw webhook receipt
-    await db.from('webhook_receipts').insert({
-      workspace_id: payload.workspace_id,
-      source_type: 'start_conversation',
-      source_identifier: payload.lead.phone,
-      idempotency_key: idempotencyKey,
-      payload_json: payload,
-      processed_status: 'processing',
-    });
+      if (existing.processed_status === 'failed') {
+        await db
+          .from('webhook_receipts')
+          .update({ processed_status: 'processing' })
+          .eq('workspace_id', payload.workspace_id)
+          .eq('idempotency_key', idempotencyKey);
+      } else {
+        return new Response(JSON.stringify({ error: 'Request already in progress' }), { status: 409 });
+      }
+    } else {
+      // Store raw webhook receipt
+      await db.from('webhook_receipts').insert({
+        workspace_id: payload.workspace_id,
+        source_type: 'start_conversation',
+        source_identifier: payload.lead.phone,
+        idempotency_key: idempotencyKey,
+        payload_json: payload,
+        processed_status: 'processing',
+      });
+    }
 
     // Upsert lead
     const leadService = new LeadService(db);
@@ -71,6 +85,12 @@ export default async (req: Request, _context: Context) => {
     const conversationService = new ConversationService(db);
     const activeConversation = await conversationService.getActiveForLead(lead.id);
     if (activeConversation) {
+      await db
+        .from('webhook_receipts')
+        .update({ processed_status: 'completed' })
+        .eq('workspace_id', payload.workspace_id)
+        .eq('idempotency_key', idempotencyKey);
+
       return new Response(
         JSON.stringify({ message: 'Lead already has an active conversation', conversation_id: activeConversation.id }),
         { status: 200 },
@@ -91,6 +111,11 @@ export default async (req: Request, _context: Context) => {
     });
 
     // Queue initial AI reply job
+    const cadence = version.reply_cadence_json as Record<string, number> | null;
+    const isManualStart = payload.source_metadata?.source === 'manual_ui';
+    const delaySec = isManualStart ? 0 : (cadence?.initial_delay_seconds ?? 0);
+    const runAt = new Date(Date.now() + delaySec * 1000);
+
     const queueService = new QueueService(db);
     await queueService.enqueue({
       workspace_id: payload.workspace_id,
@@ -100,8 +125,9 @@ export default async (req: Request, _context: Context) => {
         conversation_id: conversation.id,
         trigger: 'conversation_start',
       },
-      run_at: new Date(Date.now() + (version.reply_cadence_json as Record<string, number>).initial_delay_seconds * 1000),
+      run_at: runAt,
     });
+
 
     // Update webhook receipt
     await db
@@ -121,6 +147,13 @@ export default async (req: Request, _context: Context) => {
     );
   } catch (err) {
     console.error('webhook-start-conversation error:', err);
+    if (receiptContext) {
+      await db
+        .from('webhook_receipts')
+        .update({ processed_status: 'failed' })
+        .eq('workspace_id', receiptContext.workspaceId)
+        .eq('idempotency_key', receiptContext.idempotencyKey);
+    }
     return new Response(
       JSON.stringify({ error: err instanceof Error ? err.message : 'Internal error' }),
       { status: 500 },

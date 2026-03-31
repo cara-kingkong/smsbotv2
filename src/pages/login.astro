@@ -119,8 +119,7 @@ const publicConfig = getPublicSupabaseConfig();
       });
 
       function getAuthRedirectUrl() {
-        const baseUrl = import.meta.env.PUBLIC_SITE_URL || window.location.origin;
-        return new URL('/auth/callback', baseUrl).toString();
+        return new URL('/auth/callback', window.location.origin).toString();
       }
 
       document.getElementById('google-signin')?.addEventListener('click', async () => {

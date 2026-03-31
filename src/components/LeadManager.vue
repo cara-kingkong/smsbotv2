@@ -204,13 +204,31 @@
             </div>
           </div>
 
-          <button
-            class="button-primary"
-            :disabled="startConvLoading"
-            @click="startConversation"
-          >
-            {{ startConvLoading ? 'Starting...' : 'Start Conversation' }}
-          </button>
+          <div class="space-y-3">
+            <div>
+              <label class="form-label">Campaign</label>
+              <select
+                v-if="campaigns.length > 0"
+                v-model="selectedCampaignId"
+                class="input"
+              >
+                <option value="" disabled>Select a campaign...</option>
+                <option v-for="c in campaigns" :key="c.id" :value="c.id">{{ c.name }}</option>
+              </select>
+              <p v-else class="text-sm text-slate-500">
+                No active campaigns found.
+                <a href="/campaigns" class="text-teal-700 hover:text-teal-800 font-medium">Create one</a>
+              </p>
+            </div>
+
+            <button
+              class="button-primary"
+              :disabled="startConvLoading || !selectedCampaignId"
+              @click="startConversation"
+            >
+              {{ startConvLoading ? 'Starting...' : 'Start Conversation' }}
+            </button>
+          </div>
           <div v-if="startConvError" class="feedback-error">{{ startConvError }}</div>
           <div v-if="startConvSuccess" class="feedback-success">{{ startConvSuccess }}</div>
         </div>
@@ -221,10 +239,9 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
-import { getPublicSupabaseClient, getSessionContext } from '@lib/config/public-client';
+import { getSessionContext } from '@lib/config/public-client';
 
 const API_BASE = '/api';
-const supabase = getPublicSupabaseClient();
 
 interface LeadRecord {
   id: string;
@@ -263,6 +280,14 @@ const formSuccess = ref('');
 const startConvLoading = ref(false);
 const startConvError = ref('');
 const startConvSuccess = ref('');
+
+interface CampaignOption {
+  id: string;
+  name: string;
+  status: string;
+}
+const campaigns = ref<CampaignOption[]>([]);
+const selectedCampaignId = ref<string>('');
 
 // Timezone combobox state
 const allTimezones: string[] = (() => {
@@ -316,7 +341,6 @@ function handleClickOutsideTimezone(e: MouseEvent) {
 }
 
 let workspaceId: string | null = null;
-let campaignId: string | null = null;
 let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 
 function resolveWorkspace(): string | null {
@@ -324,17 +348,16 @@ function resolveWorkspace(): string | null {
   return workspaceId || null;
 }
 
-async function resolveDefaultCampaign(): Promise<string | null> {
-  if (!workspaceId) return null;
-  const { data } = await supabase
-    .from('campaigns')
-    .select('id')
-    .eq('workspace_id', workspaceId)
-    .eq('status', 'active')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .single();
-  return data?.id ?? null;
+async function fetchCampaigns() {
+  if (!workspaceId) return;
+  const params = new URLSearchParams({ workspace_id: workspaceId, status: 'active' });
+  const res = await fetch(`${API_BASE}/api-campaigns-list?${params}`);
+  if (res.ok) {
+    campaigns.value = await res.json();
+    if (campaigns.value.length === 1) {
+      selectedCampaignId.value = campaigns.value[0].id;
+    }
+  }
 }
 
 async function fetchLeads() {
@@ -395,12 +418,9 @@ async function startConversation() {
   startConvError.value = '';
   startConvSuccess.value = '';
 
-  if (!campaignId) {
-    campaignId = await resolveDefaultCampaign();
-    if (!campaignId) {
-      startConvError.value = 'No active campaign found. Create a campaign first.';
-      return;
-    }
+  if (!selectedCampaignId.value) {
+    startConvError.value = 'Please select a campaign first.';
+    return;
   }
 
   startConvLoading.value = true;
@@ -411,7 +431,7 @@ async function startConversation() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         workspace_id: workspaceId,
-        campaign_id: campaignId,
+        campaign_id: selectedCampaignId.value,
         lead: {
           phone: selectedLead.value.phone_e164,
           first_name: selectedLead.value.first_name,
@@ -465,7 +485,7 @@ onMounted(async () => {
     listLoading.value = false;
     return;
   }
-  await fetchLeads();
+  await Promise.all([fetchLeads(), fetchCampaigns()]);
   listLoading.value = false;
 });
 
