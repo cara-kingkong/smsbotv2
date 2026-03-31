@@ -5,7 +5,7 @@ import { getSupabaseClient } from '@lib/db/client';
 const PUBLIC_ROUTES = ['/login', '/auth/callback'];
 
 /** Route prefixes for internal server-to-server calls (no auth needed) */
-const INTERNAL_PREFIXES = ['/api/process-', '/api/webhook-'];
+const INTERNAL_PREFIXES = ['/api/process-', '/api/webhook-', '/.netlify/functions/webhook-'];
 
 function isPublic(pathname: string): boolean {
   if (PUBLIC_ROUTES.some((route) => pathname === route || pathname.startsWith(route + '/'))) return true;

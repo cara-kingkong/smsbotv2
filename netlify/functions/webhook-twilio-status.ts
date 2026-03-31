@@ -21,7 +21,8 @@ export default async (req: Request, _context: Context) => {
     const bodyText = await req.text();
     const body = Object.fromEntries(new URLSearchParams(bodyText)) as Record<string, string>;
 
-    const isValid = twilioAdapter.validateWebhookSignature(req.url, req.headers, body);
+    const publicUrl = resolvePublicUrl(req);
+    const isValid = twilioAdapter.validateWebhookSignature(publicUrl, req.headers, body);
     if (!isValid) {
       return new Response('Unauthorized', { status: 401 });
     }
@@ -59,3 +60,11 @@ export default async (req: Request, _context: Context) => {
     return new Response('Internal error', { status: 500 });
   }
 };
+
+function resolvePublicUrl(req: Request): string {
+  const url = new URL(req.url);
+  const forwardedHost = req.headers.get('x-forwarded-host') || url.host;
+  const forwardedProto = req.headers.get('x-forwarded-proto') || url.protocol.replace(':', '');
+
+  return `${forwardedProto}://${forwardedHost}${url.pathname}${url.search}`;
+}

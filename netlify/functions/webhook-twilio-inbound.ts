@@ -29,10 +29,14 @@ export default async (req: Request, _context: Context) => {
     const bodyText = await req.text();
     const body = Object.fromEntries(new URLSearchParams(bodyText)) as Record<string, string>;
 
-    // Validate webhook signature before touching the database.
-    const isValid = twilioAdapter.validateWebhookSignature(req.url, req.headers, body);
+    // Reconstruct the public URL for Twilio signature validation.
+    // Behind proxies (Cloudflare tunnel, Netlify Dev) req.url is the local
+    // address, but Twilio computed the signature using the public URL.
+    const publicUrl = resolvePublicUrl(req);
+
+    const isValid = twilioAdapter.validateWebhookSignature(publicUrl, req.headers, body);
     if (!isValid) {
-      console.warn('Invalid Twilio webhook signature');
+      console.warn('Invalid Twilio webhook signature. Tried URL:', publicUrl);
       return new Response('Unauthorized', { status: 401 });
     }
 
@@ -114,7 +118,7 @@ export default async (req: Request, _context: Context) => {
     // Find active conversation for this lead
     const { data: conversation } = await db
       .from('conversations')
-      .select('id, status, human_controlled')
+      .select('id, status, human_controlled, agent_version_id')
       .eq('lead_id', lead.id)
       .in('status', [
         ConversationStatus.Active,
@@ -206,9 +210,25 @@ export default async (req: Request, _context: Context) => {
       conversation.human_controlled ? ConversationStatus.HumanControlled : ConversationStatus.Active,
     );
 
-    // If not human-controlled, queue AI evaluation
+    // If not human-controlled, queue AI evaluation with realistic reply delay
     if (!conversation.human_controlled) {
       const queueService = new QueueService(db);
+
+      // Look up the agent version's initial_delay_seconds for a realistic typing delay
+      let runAt: Date | undefined;
+      if (conversation.agent_version_id) {
+        const { data: agentVersion } = await db
+          .from('agent_versions')
+          .select('reply_cadence_json')
+          .eq('id', conversation.agent_version_id)
+          .single();
+
+        const delaySec = agentVersion?.reply_cadence_json?.initial_delay_seconds;
+        if (delaySec && delaySec > 0) {
+          runAt = new Date(Date.now() + delaySec * 1000);
+        }
+      }
+
       await queueService.enqueue({
         workspace_id: lead.workspace_id,
         job_type: 'generate_ai_reply',
@@ -217,6 +237,7 @@ export default async (req: Request, _context: Context) => {
           conversation_id: conversation.id,
           trigger: 'inbound_message',
         },
+        ...(runAt ? { run_at: runAt } : {}),
       });
     }
 
@@ -254,3 +275,16 @@ export default async (req: Request, _context: Context) => {
     });
   }
 };
+
+/**
+ * Reconstruct the public-facing URL that Twilio used to send the request.
+ * Proxies (Cloudflare tunnel, Netlify Dev) rewrite req.url to the local
+ * address, but Twilio's signature was computed against the original URL.
+ */
+function resolvePublicUrl(req: Request): string {
+  const url = new URL(req.url);
+  const forwardedHost = req.headers.get('x-forwarded-host') || url.host;
+  const forwardedProto = req.headers.get('x-forwarded-proto') || url.protocol.replace(':', '');
+
+  return `${forwardedProto}://${forwardedHost}${url.pathname}${url.search}`;
+}

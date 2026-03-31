@@ -3,5 +3,5 @@ credentials-file: /Users/caragammon/.cloudflared/82882157-159f-413a-9101-3da79f1
 
 ingress:
   - hostname: webhooks-dev.kingkong.net.au
-    service: http://localhost:4321
+    service: http://localhost:8888
   - service: http_status:404
