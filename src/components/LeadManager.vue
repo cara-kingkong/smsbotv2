@@ -18,7 +18,9 @@
       </div>
 
       <div class="flex-1 overflow-y-auto px-3 py-3">
-        <div v-if="listLoading" class="empty-state min-h-full">Loading leads...</div>
+        <div v-if="listLoading" class="space-y-2 p-1">
+          <div v-for="i in 5" :key="i" class="skeleton-row"></div>
+        </div>
         <div v-else-if="leads.length === 0" class="empty-state min-h-full">
           No leads found. Add your first lead using the form.
         </div>

@@ -43,7 +43,10 @@ export default async (req: Request, _context: Context) => {
 
     return new Response(JSON.stringify(data ?? []), {
       status: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'private, max-age=10, stale-while-revalidate=30',
+      },
     });
   } catch (err) {
     console.error('api-leads-list error:', err);

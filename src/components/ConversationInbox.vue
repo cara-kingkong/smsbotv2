@@ -27,7 +27,9 @@
       </div>
 
       <div class="flex-1 overflow-y-auto px-3 py-3">
-        <div v-if="loading" class="empty-state min-h-full">Loading conversations...</div>
+        <div v-if="loading" class="space-y-2 p-1">
+          <div v-for="i in 6" :key="i" class="skeleton-row"></div>
+        </div>
         <div v-else-if="loadError" class="empty-state min-h-full">{{ loadError }}</div>
         <div v-else-if="conversations.length === 0" class="empty-state min-h-full">
           No conversations found{{ currentFilter ? ' for this filter' : '' }}.
@@ -118,7 +120,11 @@
           class="flex-1 overflow-y-auto px-5 py-5"
           style="background: linear-gradient(180deg, rgba(255,255,255,0.42), rgba(245,247,244,0.78));"
         >
-          <div v-if="messagesLoading" class="empty-state min-h-full">Loading messages...</div>
+          <div v-if="messagesLoading" class="space-y-3 p-2">
+            <div v-for="i in 5" :key="i" class="flex" :class="i % 2 === 0 ? 'justify-end' : 'justify-start'">
+              <div class="skeleton-card" :style="{ width: `${45 + (i * 7) % 30}%`, height: '3.5rem' }"></div>
+            </div>
+          </div>
           <div v-else-if="messagesError" class="empty-state min-h-full">{{ messagesError }}</div>
           <div v-else-if="messages.length === 0" class="empty-state min-h-full">No messages yet.</div>
           <div v-else class="flex flex-col gap-3">
@@ -230,6 +236,7 @@ const replyRef = ref<HTMLTextAreaElement | null>(null);
 
 let workspaceId: string | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let visibilityHandler: (() => void) | null = null;
 
 const isTerminal = computed(() =>
   selected.value ? ['completed', 'opted_out', 'failed'].includes(selected.value.status) : false
@@ -456,17 +463,27 @@ onMounted(async () => {
   await fetchConversations();
   loading.value = false;
 
-  pollTimer = setInterval(async () => {
+  const poll = async () => {
+    if (document.hidden) return; // Skip polling when tab is not visible
     await fetchConversations();
     if (selectedId.value) {
       await fetchMessages(selectedId.value);
       const updated = conversations.value.find((c) => c.id === selectedId.value);
       if (updated) selected.value = updated;
     }
-  }, 15000);
+  };
+
+  pollTimer = setInterval(poll, 20000);
+
+  // Immediately poll when tab becomes visible after being hidden
+  visibilityHandler = () => {
+    if (!document.hidden) poll();
+  };
+  document.addEventListener('visibilitychange', visibilityHandler);
 });
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer);
+  if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler);
 });
 </script>

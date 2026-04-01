@@ -30,14 +30,17 @@
         class="bg-surface border border-slate-700 rounded-lg p-3 text-center"
       >
         <div class="text-xs text-slate-400 uppercase tracking-wide mb-1">{{ s.replace('_', ' ') }}</div>
-        <div class="text-xl font-semibold" :class="badgeTextClass(s)">{{ statusCounts[s] ?? 0 }}</div>
+        <div class="text-xl font-semibold" :class="badgeTextClass(s)">
+          <template v-if="loading"><span class="skeleton-value-sm">&nbsp;</span></template>
+          <template v-else>{{ statusCounts[s] ?? 0 }}</template>
+        </div>
       </div>
     </div>
 
     <!-- Jobs table -->
     <div class="bg-surface border border-slate-700 rounded-lg overflow-hidden">
-      <div v-if="loading" class="flex items-center justify-center py-12 text-slate-400 text-sm">
-        Loading jobs...
+      <div v-if="loading" class="space-y-2 p-3">
+        <div v-for="i in 5" :key="i" class="skeleton-row"></div>
       </div>
       <div v-else-if="filteredJobs.length === 0" class="flex items-center justify-center py-12 text-slate-400 text-sm">
         No jobs found{{ activeFilter !== 'all' ? ` with status "${activeFilter.replace('_', ' ')}"` : '' }}.
@@ -99,7 +102,7 @@
 
     <!-- Auto-refresh indicator -->
     <div class="text-[11px] text-slate-500 text-right">
-      Auto-refreshes every 10s
+      Auto-refreshes every 15s
     </div>
   </div>
 </template>
@@ -299,10 +302,29 @@ onMounted(async () => {
   await fetchJobs();
   loading.value = false;
 
-  refreshInterval = setInterval(fetchJobs, 10000);
+  const pollJobs = () => {
+    if (document.hidden) return;
+    fetchJobs();
+  };
+
+  refreshInterval = setInterval(pollJobs, 15000);
+
+  // Refresh immediately when tab becomes visible
+  const onVisibilityChange = () => {
+    if (!document.hidden) fetchJobs();
+  };
+  document.addEventListener('visibilitychange', onVisibilityChange);
+
+  // Store cleanup reference
+  (window as any).__jobQueueVisHandler = onVisibilityChange;
 });
 
 onUnmounted(() => {
   if (refreshInterval) clearInterval(refreshInterval);
+  const handler = (window as any).__jobQueueVisHandler;
+  if (handler) {
+    document.removeEventListener('visibilitychange', handler);
+    delete (window as any).__jobQueueVisHandler;
+  }
 });
 </script>

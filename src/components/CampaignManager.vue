@@ -7,7 +7,6 @@
         type="text"
         placeholder="Search campaigns..."
         class="input sm:max-w-xs"
-        @input="debouncedSearch"
       />
       <button class="button-primary" @click="showCreateModal = true">
         Create Campaign
@@ -15,7 +14,9 @@
     </div>
 
     <!-- Campaign list -->
-    <div v-if="listLoading" class="empty-state">Loading campaigns...</div>
+    <div v-if="listLoading" class="space-y-3">
+      <div v-for="i in 3" :key="i" class="skeleton-row"></div>
+    </div>
     <div v-else-if="filteredCampaigns.length === 0" class="empty-state">
       <div class="text-center space-y-3">
         <template v-if="campaigns.length === 0">
@@ -230,7 +231,6 @@ const formError = ref('');
 const formSuccess = ref('');
 
 let workspaceId: string | null = null;
-let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const filteredCampaigns = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
@@ -261,11 +261,6 @@ async function fetchCampaigns() {
   const params = new URLSearchParams({ workspace_id: workspaceId });
   const res = await fetch(`${API_BASE}/api-campaigns-list?${params}`);
   if (res.ok) campaigns.value = await res.json();
-}
-
-function debouncedSearch() {
-  if (searchTimeout) clearTimeout(searchTimeout);
-  searchTimeout = setTimeout(() => fetchCampaigns(), 300);
 }
 
 function buildBusinessHoursJson(tz: string, days: number[], start: string, end: string) {

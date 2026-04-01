@@ -80,18 +80,20 @@ export default async (req: Request, _context: Context) =>
     const twilioAdapter = new TwilioAdapter(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
     const messagingService = new MessagingService(db, twilioAdapter);
 
-    const version = await agentService.getVersionById(conversation.agent_version_id);
+    // Parallel fetch: version, lead, campaign are independent lookups
+    const [version, lead, campaign] = await Promise.all([
+      agentService.getVersionById(conversation.agent_version_id),
+      leadService.getById(conversation.lead_id),
+      campaignService.getById(conversation.campaign_id),
+    ]);
+
     if (!version) throw new Error(`Conversation ${conversation_id} is missing agent version ${conversation.agent_version_id}`);
     if (version.agent_id !== conversation.agent_id) {
       throw new Error(
         `Conversation ${conversation_id} references version ${version.id} that does not belong to agent ${conversation.agent_id}`,
       );
     }
-
-    const lead = await leadService.getById(conversation.lead_id);
     if (!lead) throw new Error(`Lead not found: ${conversation.lead_id}`);
-
-    const campaign = await campaignService.getById(conversation.campaign_id);
     if (!campaign) throw new Error(`Campaign not found: ${conversation.campaign_id}`);
 
     const workspaceService = new WorkspaceService(db);

@@ -1,12 +1,15 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { ReportingService } from '../../src/lib/reporting/service';
-import type { CampaignMetrics } from '../../src/lib/reporting/service';
 import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
  * Fetch full workspace reporting: workspace-level metrics plus per-campaign
  * split-test breakdowns in a single call.
+ *
+ * Optimised: uses getFullWorkspaceReport() which runs 3 parallel queries
+ * instead of the old N+1 pattern (1 + 3 per campaign).
+ *
  * GET /.netlify/functions/api-reporting-workspace?workspace_id=...
  */
 export default async (req: Request, _context: Context) => {
@@ -23,40 +26,15 @@ export default async (req: Request, _context: Context) => {
     if (access instanceof Response) return access;
 
     const reportingService = new ReportingService(db);
+    const report = await reportingService.getFullWorkspaceReport(access.workspace.id);
 
-    // Fetch workspace-level metrics
-    const workspaceMetrics = await reportingService.getWorkspaceMetrics(access.workspace.id);
-
-    // Fetch all campaigns for this workspace
-    const { data: campaigns, error } = await db
-      .from('campaigns')
-      .select('id')
-      .eq('workspace_id', access.workspace.id)
-      .is('deleted_at', null);
-
-    if (error) throw new Error(`Failed to fetch campaigns: ${error.message}`);
-
-    // Fetch metrics for each campaign in parallel
-    const campaignIds = (campaigns ?? []).map((c) => c.id);
-    const campaignMetricsResults = await Promise.all(
-      campaignIds.map((id) => reportingService.getCampaignMetrics(id)),
-    );
-
-    // Filter out nulls (shouldn't happen, but be safe)
-    const campaignMetrics: CampaignMetrics[] = campaignMetricsResults.filter(
-      (m): m is CampaignMetrics => m !== null,
-    );
-
-    return new Response(
-      JSON.stringify({
-        workspace_metrics: workspaceMetrics,
-        campaigns: campaignMetrics,
-      }),
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
+    return new Response(JSON.stringify(report), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'private, max-age=10, stale-while-revalidate=30',
       },
-    );
+    });
   } catch (err) {
     console.error('api-reporting-workspace error:', err);
     return new Response(

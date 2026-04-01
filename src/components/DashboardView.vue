@@ -19,17 +19,26 @@
           <div class="mt-6 grid gap-3 sm:grid-cols-3">
             <div class="stat-card">
               <div class="stat-label">Campaigns Tracked</div>
-              <div class="stat-value text-[2rem]">{{ campaigns.length }}</div>
+              <div class="stat-value text-[2rem]">
+                <template v-if="loading"><span class="skeleton-value">&nbsp;</span></template>
+                <template v-else>{{ campaigns.length }}</template>
+              </div>
               <div class="stat-meta">Live reporting coverage across this workspace.</div>
             </div>
             <div class="stat-card">
               <div class="stat-label">Booking Rate</div>
-              <div class="stat-value text-[2rem]">{{ formatPct(bookedRate) }}</div>
+              <div class="stat-value text-[2rem]">
+                <template v-if="loading"><span class="skeleton-value">&nbsp;</span></template>
+                <template v-else>{{ formatPct(bookedRate) }}</template>
+              </div>
               <div class="stat-meta">Calculated from all tracked conversations.</div>
             </div>
             <div class="stat-card">
               <div class="stat-label">Needs Human</div>
-              <div class="stat-value text-[2rem]">{{ formatPct(attentionRate) }}</div>
+              <div class="stat-value text-[2rem]">
+                <template v-if="loading"><span class="skeleton-value">&nbsp;</span></template>
+                <template v-else>{{ formatPct(attentionRate) }}</template>
+              </div>
               <div class="stat-meta">Share of threads requiring operator follow-up.</div>
             </div>
           </div>
@@ -39,10 +48,12 @@
           <div>
             <div class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Main Info</div>
             <div class="mt-3 text-xl font-semibold tracking-tight text-slate-900">
-              {{ topCampaign?.campaign_name ?? 'No campaign data yet' }}
+              <template v-if="loading"><span class="skeleton-text w-48">&nbsp;</span></template>
+              <template v-else>{{ topCampaign?.campaign_name ?? 'No campaign data yet' }}</template>
             </div>
             <p class="mt-2 text-sm leading-6 text-slate-600">
-              <template v-if="topCampaign">
+              <template v-if="loading"><span class="skeleton-text w-64">&nbsp;</span></template>
+              <template v-else-if="topCampaign">
                 Top campaign by current booking rate across the latest workspace metrics.
               </template>
               <template v-else>
@@ -54,19 +65,31 @@
           <div class="divide-y divide-slate-200/70 rounded-[16px] border border-slate-200/70 bg-white/88">
             <div class="flex items-center justify-between px-4 py-3 text-sm">
               <span class="text-slate-500">Conversations</span>
-              <span class="font-semibold text-slate-900">{{ stats.total ?? 0 }}</span>
+              <span class="font-semibold text-slate-900">
+                <template v-if="loading"><span class="skeleton-value-sm">&nbsp;</span></template>
+                <template v-else>{{ stats.total ?? 0 }}</template>
+              </span>
             </div>
             <div class="flex items-center justify-between px-4 py-3 text-sm">
               <span class="text-slate-500">Booking rate</span>
-              <span class="font-semibold text-slate-900">{{ formatPct(bookedRate) }}</span>
+              <span class="font-semibold text-slate-900">
+                <template v-if="loading"><span class="skeleton-value-sm">&nbsp;</span></template>
+                <template v-else>{{ formatPct(bookedRate) }}</template>
+              </span>
             </div>
             <div class="flex items-center justify-between px-4 py-3 text-sm">
               <span class="text-slate-500">Needs human</span>
-              <span class="font-semibold text-slate-900">{{ stats.needs_human ?? 0 }}</span>
+              <span class="font-semibold text-slate-900">
+                <template v-if="loading"><span class="skeleton-value-sm">&nbsp;</span></template>
+                <template v-else>{{ stats.needs_human ?? 0 }}</template>
+              </span>
             </div>
             <div class="flex items-center justify-between px-4 py-3 text-sm">
               <span class="text-slate-500">Recent threads</span>
-              <span class="font-semibold text-slate-900">{{ conversations.length }}</span>
+              <span class="font-semibold text-slate-900">
+                <template v-if="loading"><span class="skeleton-value-sm">&nbsp;</span></template>
+                <template v-else>{{ conversations.length }}</template>
+              </span>
             </div>
           </div>
 
@@ -88,7 +111,10 @@
         @click="stat.clickable ? goToConversations() : undefined"
       >
         <div class="stat-label">{{ stat.label }}</div>
-        <div class="stat-value">{{ stats[stat.key] ?? '--' }}</div>
+        <div class="stat-value">
+          <template v-if="loading"><span class="skeleton-value">&nbsp;</span></template>
+          <template v-else>{{ stats[stat.key] ?? '--' }}</template>
+        </div>
         <div class="stat-meta">{{ stat.description }}</div>
       </div>
     </section>
@@ -103,7 +129,10 @@
           <div class="page-badge">Performance by campaign</div>
         </div>
 
-        <div v-if="campaigns.length === 0" class="empty-state">
+        <div v-if="loading" class="space-y-4">
+          <div v-for="i in 2" :key="i" class="skeleton-card h-32"></div>
+        </div>
+        <div v-else-if="campaigns.length === 0" class="empty-state">
           Campaign analytics will appear here once campaigns start receiving conversation volume.
         </div>
 

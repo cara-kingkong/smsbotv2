@@ -46,7 +46,7 @@ export default async (req: Request, _context: Context) => {
     let query = db
       .from('conversations')
       .select(`
-        *,
+        id, status, human_controlled, needs_human, last_activity_at, outcome,
         lead:leads(id, first_name, last_name, phone_e164, email)
       `)
       .eq('workspace_id', access.workspace.id)
@@ -65,17 +65,25 @@ export default async (req: Request, _context: Context) => {
     const lastMessageByConversation = new Map<string, unknown>();
 
     if (conversationIds.length > 0) {
-      const { data: messages, error: messageError } = await db
-        .from('messages')
-        .select('id, conversation_id, body_text, sender_type, direction, created_at')
-        .in('conversation_id', conversationIds)
-        .order('created_at', { ascending: false });
+      // Fetch only the most recent message per conversation using limit per group.
+      // Supabase doesn't support DISTINCT ON, so we fetch 1 message per conversation
+      // in parallel batches to avoid pulling all messages into memory.
+      const messagePromises = conversationIds.map((convId) =>
+        db
+          .from('messages')
+          .select('id, conversation_id, body_text, sender_type, direction, created_at')
+          .eq('conversation_id', convId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+      );
 
-      if (messageError) throw new Error(`Failed to load inbox messages: ${messageError.message}`);
+      const messageResults = await Promise.all(messagePromises);
 
-      for (const message of messages ?? []) {
-        if (!lastMessageByConversation.has(message.conversation_id)) {
-          lastMessageByConversation.set(message.conversation_id, [message]);
+      for (const result of messageResults) {
+        if (result.error) continue;
+        const msg = result.data?.[0];
+        if (msg) {
+          lastMessageByConversation.set(msg.conversation_id, [msg]);
         }
       }
     }
@@ -87,7 +95,10 @@ export default async (req: Request, _context: Context) => {
 
     return new Response(JSON.stringify(payload), {
       status: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'private, max-age=5, stale-while-revalidate=15',
+      },
     });
   } catch (err) {
     console.error('api-inbox-list error:', err);

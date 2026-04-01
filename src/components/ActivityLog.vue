@@ -15,8 +15,8 @@
 
     <!-- Content -->
     <div class="flex-1 overflow-y-auto">
-      <div v-if="loading" class="flex items-center justify-center h-full text-slate-400 text-sm">
-        Loading...
+      <div v-if="loading" class="space-y-2 p-3">
+        <div v-for="i in 8" :key="i" class="skeleton-row"></div>
       </div>
       <div v-else-if="logs.length === 0" class="flex items-center justify-center h-full text-slate-400 text-sm p-6 text-center">
         No activity logs found.

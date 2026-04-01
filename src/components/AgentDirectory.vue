@@ -27,7 +27,9 @@
     </div>
 
     <!-- Agent list -->
-    <div v-if="listLoading" class="empty-state">Loading agents...</div>
+    <div v-if="listLoading" class="space-y-3">
+      <div v-for="i in 3" :key="i" class="skeleton-row"></div>
+    </div>
     <div v-else-if="filteredAgents.length === 0" class="empty-state">
       <div class="text-center space-y-3">
         <template v-if="agents.length === 0">

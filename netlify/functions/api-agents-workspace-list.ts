@@ -25,7 +25,10 @@ export default async (req: Request, _context: Context) => {
 
     return new Response(JSON.stringify(agents), {
       status: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'private, max-age=15, stale-while-revalidate=30',
+      },
     });
   } catch (err) {
     console.error('api-agents-workspace-list error:', err);
