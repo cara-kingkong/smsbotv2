@@ -30,7 +30,13 @@
 
         <div v-if="!card.expanded" class="mt-5 flex-1">
           <div class="note-box">
-            <template v-if="card.connected">
+            <template v-if="card.provider === 'twilio' && card.envConfigured">
+              Connected via server environment variables. No additional configuration needed.
+            </template>
+            <template v-else-if="card.provider === 'twilio' && !card.envConfigured && !card.connected">
+              Twilio credentials must be set as environment variables on the server (<span class="font-mono text-xs">TWILIO_ACCOUNT_SID</span>, <span class="font-mono text-xs">TWILIO_AUTH_TOKEN</span>, <span class="font-mono text-xs">TWILIO_PHONE_NUMBER</span>).
+            </template>
+            <template v-else-if="card.connected">
               Saved label: <span class="font-semibold text-slate-900">{{ card.savedName }}</span>
             </template>
             <template v-else>
@@ -94,8 +100,12 @@
 
           <template v-else-if="card.provider === 'calendly'">
             <div>
-              <label class="form-label">API Key</label>
-              <input v-model="card.form.api_key" type="password" placeholder="Your Calendly API key" class="input" />
+              <label class="form-label">Personal Access Token</label>
+              <input v-model="card.form.api_key" type="password" placeholder="eyJra..." class="input" />
+              <p class="mt-1.5 text-xs text-slate-500">
+                Generate a token at
+                <a href="https://calendly.com/integrations/api_webhooks" target="_blank" rel="noopener noreferrer" class="font-medium text-teal-600 hover:text-teal-700">calendly.com/integrations/api_webhooks</a>
+              </p>
             </div>
           </template>
 
@@ -121,7 +131,7 @@
           </div>
         </div>
 
-        <div v-if="!card.expanded" class="mt-6 flex flex-wrap gap-2">
+        <div v-if="!card.expanded && !(card.provider === 'twilio' && card.envConfigured)" class="mt-6 flex flex-wrap gap-2">
           <button class="button-secondary flex-1" @click="openConfig(card)">Configure</button>
           <button class="button-ghost" :class="!card.connected ? 'cursor-not-allowed opacity-50' : ''" :disabled="!card.connected" @click="validateConfig(card)">
             Validate config
@@ -159,6 +169,14 @@ interface ProviderCard {
   saveError: string;
   validationMessage: string;
   form: Record<string, string>;
+  envConfigured?: boolean;
+}
+
+interface TwilioEnvStatus {
+  account_sid: boolean;
+  auth_token: boolean;
+  phone_number: boolean;
+  configured: boolean;
 }
 
 const loading = ref(true);
@@ -253,6 +271,24 @@ function resolveWorkspace(): string | null {
   return workspaceId || null;
 }
 
+async function fetchEnvStatus() {
+  if (!workspaceId) return;
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  try {
+    const res = await fetch(`${API_BASE}/api-integrations-env-status?${params}`);
+    if (!res.ok) return;
+    const status: { twilio: TwilioEnvStatus } = await res.json();
+
+    const twilioCard = providerCards.find((c) => c.provider === 'twilio');
+    if (twilioCard && status.twilio?.configured) {
+      twilioCard.envConfigured = true;
+      twilioCard.connected = true;
+    }
+  } catch {
+    // Non-critical — fall back to DB-only state
+  }
+}
+
 async function fetchIntegrations() {
   if (!workspaceId) return;
   const params = new URLSearchParams({ workspace_id: workspaceId });
@@ -303,7 +339,7 @@ function buildConfigJson(card: ProviderCard): Record<string, unknown> {
     config.model = card.form.model || 'claude-sonnet-4-20250514';
     config.configured = !!card.form.api_key;
   } else if (card.provider === 'calendly') {
-    config.api_key_ref = card.form.api_key ? 'CALENDLY_API_KEY' : '';
+    config.personal_access_token_ref = card.form.api_key ? 'CALENDLY_PERSONAL_ACCESS_TOKEN' : '';
     config.configured = !!card.form.api_key;
   } else if (card.provider === 'keap') {
     config.api_key_ref = card.form.api_key ? 'KEAP_API_KEY' : '';
@@ -378,7 +414,7 @@ onMounted(async () => {
     loading.value = false;
     return;
   }
-  await fetchIntegrations();
+  await Promise.all([fetchIntegrations(), fetchEnvStatus()]);
   loading.value = false;
 });
 </script>

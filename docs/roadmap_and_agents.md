@@ -153,6 +153,7 @@ Deliverables:
 - Self-serve workspace provisioning
 - Billing/event model placeholders
 - Subscription-aware feature flags
+- Twilio Connect integration — replace manual credential entry with OAuth-style "Connect with Twilio" button so workspace owners can authorize their Twilio account without copy/pasting API keys. Billing stays on the customer's Twilio account. Uses Twilio's Connect Apps API to receive a sandboxed subaccount SID per workspace.
 - More granular RBAC
 - CRM adapter expansion
 - Calendar provider expansion
@@ -193,6 +194,7 @@ Exit criteria:
 #### Later
 - Billing
 - Self-serve signup
+- Twilio Connect OAuth flow (replace manual API key entry with "Connect with Twilio" button)
 - More CRM integrations
 - More calendar systems
 - More granular permissions
@@ -804,6 +806,7 @@ A feature is only considered done when:
 Future versions may add:
 - self-serve signup
 - billing
+- Twilio Connect OAuth flow (eliminates manual credential entry for workspace Twilio setup)
 - more CRM providers
 - more calendar systems
 - client-friendly setup wizard

@@ -1,5 +1,6 @@
 <template>
-  <div class="space-y-8">
+  <SetupDashboard v-if="!isActivated" />
+  <div v-else class="space-y-8">
     <section class="hero-panel">
       <div class="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
         <div>
@@ -209,6 +210,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { getSessionContext } from '@lib/config/public-client';
+import SetupDashboard from './SetupDashboard.vue';
 
 const API_BASE = '/api';
 
@@ -244,6 +246,7 @@ interface CampaignMetric {
   agent_metrics: AgentMetric[];
 }
 
+const isActivated = ref(true); // default to true so normal dashboard shows during SSR
 const loading = ref(true);
 const stats = ref<Record<string, number>>({});
 const conversations = ref<Conv[]>([]);
@@ -336,6 +339,13 @@ function resolveWorkspace(): string | null {
 }
 
 onMounted(async () => {
+  const onboarding = (window as any).__KONG_ONBOARDING__;
+  if (onboarding && !onboarding.isActivated) {
+    isActivated.value = false;
+    loading.value = false;
+    return; // Don't fetch dashboard data during setup
+  }
+
   const workspaceId = resolveWorkspace();
   if (!workspaceId) {
     loading.value = false;

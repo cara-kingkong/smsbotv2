@@ -139,16 +139,34 @@ export interface Calendar {
   workspace_id: string;
   integration_id: string;
   name: string;
-  booking_url: string;
-  eligibility_rules_json: Record<string, unknown>;
+  external_calendar_id: string | null;
+  booking_url: string | null;
+  eligibility_rules_json: EligibilityRules | Record<string, never>;
+  settings_json: Record<string, unknown>;
   status: EntityStatus;
   created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface EligibilityRules {
+  required_tags?: string[];
+  required_fields?: string[];
+  rules?: EligibilityRule[];
+}
+
+export interface EligibilityRule {
+  field: string;
+  operator: '>=' | '<=' | '==' | '!=' | 'contains';
+  value: string | number;
 }
 
 export interface AgentCalendar {
   id: string;
+  workspace_id: string;
   agent_id: string;
   calendar_id: string;
+  created_at: string;
 }
 
 // ─── Lead ────────────────────────────────────────────────────

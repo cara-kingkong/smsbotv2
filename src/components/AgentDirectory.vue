@@ -29,12 +29,20 @@
     <!-- Agent list -->
     <div v-if="listLoading" class="empty-state">Loading agents...</div>
     <div v-else-if="filteredAgents.length === 0" class="empty-state">
-      <template v-if="agents.length === 0">
-        No agents yet. Click "New Agent" to create your first agent.
-      </template>
-      <template v-else>
-        No agents match your search or filter.
-      </template>
+      <div class="text-center space-y-3">
+        <template v-if="agents.length === 0">
+          <div class="text-base font-semibold text-slate-900">No agents yet</div>
+          <p class="text-sm text-slate-500 max-w-xs mx-auto">Agents handle SMS conversations for your campaigns. They qualify leads, answer questions, and book meetings.</p>
+          <button v-if="campaigns.length > 0" class="button-primary mt-2" @click="showCreateModal = true">Create your first agent</button>
+          <div v-else class="mt-2">
+            <p class="text-xs text-slate-400 mb-2">You need a campaign first before adding agents.</p>
+            <a href="/campaigns" class="button-secondary text-sm">Create a campaign</a>
+          </div>
+        </template>
+        <template v-else>
+          <div class="text-sm text-slate-500">No agents match your search or filter.</div>
+        </template>
+      </div>
     </div>
     <div v-else class="space-y-3">
       <a

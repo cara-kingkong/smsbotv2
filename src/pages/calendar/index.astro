@@ -1,0 +1,21 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import CalendarView from '@components/CalendarView.vue';
+---
+
+<BaseLayout title="Calendar">
+  <div class="page-header">
+    <div class="page-header-row">
+      <div>
+        <p class="page-kicker">Booking Calendar</p>
+        <h1 class="page-title">Calendar</h1>
+        <p class="page-subtitle">
+          Manage your Calendly connection and see booking activity from qualified leads.
+        </p>
+      </div>
+      <div class="page-badge">Calendly integration</div>
+    </div>
+  </div>
+
+  <CalendarView client:load />
+</BaseLayout>

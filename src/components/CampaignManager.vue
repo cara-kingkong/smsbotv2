@@ -17,7 +17,16 @@
     <!-- Campaign list -->
     <div v-if="listLoading" class="empty-state">Loading campaigns...</div>
     <div v-else-if="filteredCampaigns.length === 0" class="empty-state">
-      No campaigns found. Click "Create Campaign" to get started.
+      <div class="text-center space-y-3">
+        <template v-if="campaigns.length === 0">
+          <div class="text-base font-semibold text-slate-900">No campaigns yet</div>
+          <p class="text-sm text-slate-500 max-w-xs mx-auto">A campaign defines when and how your AI agent responds to incoming SMS messages.</p>
+          <button class="button-primary mt-2" @click="showCreateModal = true">Create campaign</button>
+        </template>
+        <template v-else>
+          <div class="text-sm text-slate-500">No campaigns match your search.</div>
+        </template>
+      </div>
     </div>
     <div v-else class="space-y-3">
       <a

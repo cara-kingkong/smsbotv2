@@ -3,6 +3,8 @@ import type { AuthSession } from '@lib/auth/middleware';
 import { ensureWorkspace } from '@lib/auth/ensure-workspace';
 import { getPublicSupabaseConfig } from '@lib/config/public-server';
 import { getServiceClient } from '@lib/db/client';
+import { computeOnboardingState } from '@lib/onboarding/service';
+import type { OnboardingState } from '@lib/onboarding/service';
 import '../styles/global.css';
 
 interface Props {
@@ -32,6 +34,23 @@ const { data: workspaceRow } = await db
 const userName = userRow?.full_name || session.email.split('@')[0];
 const workspaceName = workspaceRow?.name || 'Workspace';
 
+let onboardingState: OnboardingState;
+try {
+  onboardingState = await computeOnboardingState(workspaceId);
+} catch (err) {
+  console.error('[onboarding] Failed to compute state:', err);
+  // Fallback: assume activated so the app works normally if the query fails
+  onboardingState = {
+    hasCampaign: true,
+    hasAgent: true,
+    hasSmsProvider: true,
+    hasCalendar: true,
+    isActivated: true,
+    currentStep: 5,
+    completedSteps: 4,
+  };
+}
+
 const publicConfig = getPublicSupabaseConfig({
   workspaceId,
   userId: session.user_id,
@@ -45,15 +64,16 @@ const mainNav = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/campaigns', label: 'Campaigns' },
   { href: '/agents', label: 'Agents' },
+  { href: '/calendar', label: 'Calendar' },
   { href: '/conversations', label: 'Conversations' },
 ];
 
-const adminNav = [
+const adminNav = onboardingState.isActivated ? [
   { href: '/admin/leads', label: 'Leads' },
   { href: '/admin/webhooks', label: 'Webhooks' },
   { href: '/admin/jobs', label: 'Job Queue' },
   { href: '/admin/activity', label: 'Activity Log' },
-];
+] : [];
 
 const userInitial = userName.charAt(0).toUpperCase();
 ---
@@ -72,6 +92,9 @@ const userInitial = userName.charAt(0).toUpperCase();
     />
     <script define:vars={{ publicConfig }}>
       window.__KONG_PUBLIC_CONFIG__ = publicConfig;
+    </script>
+    <script define:vars={{ onboardingState }}>
+      window.__KONG_ONBOARDING__ = onboardingState;
     </script>
   </head>
   <body>
@@ -114,38 +137,45 @@ const userInitial = userName.charAt(0).toUpperCase();
               <div class="nav-group-slim">
                 <div class="nav-label">Core</div>
                 <div class="space-y-1">
-                  {mainNav.map(link => (
-                    <a
-                      href={link.href}
-                      class:list={[
-                        'nav-link',
-                        currentPath.startsWith(link.href) && 'nav-link-active',
-                      ]}
-                    >
-                      <span>{link.label}</span>
-                      <span class="nav-link-dot"></span>
-                    </a>
-                  ))}
+                  {mainNav.map(link => {
+                    const needsAttention = !onboardingState.isActivated && (
+                      (link.href === '/campaigns' && !onboardingState.hasCampaign) ||
+                      (link.href === '/agents' && !onboardingState.hasAgent) ||
+                      (link.href === '/calendar' && !onboardingState.hasCalendar)
+                    );
+                    return (
+                      <a
+                        href={link.href}
+                        class:list={[
+                          'nav-link',
+                          currentPath.startsWith(link.href) && 'nav-link-active',
+                        ]}
+                      >
+                        <span>{link.label}</span>
+                        {needsAttention ? (
+                          <span class="nav-link-attention-dot"></span>
+                        ) : (
+                          <span class="nav-link-dot"></span>
+                        )}
+                      </a>
+                    );
+                  })}
                 </div>
               </div>
 
-              <div class="nav-group-slim">
-                <div class="nav-label">Operations</div>
-                <div class="space-y-1">
-                  {adminNav.map(link => (
-                    <a
-                      href={link.href}
-                      class:list={[
-                        'nav-link',
-                        currentPath.startsWith(link.href) && 'nav-link-active',
-                      ]}
-                    >
-                      <span>{link.label}</span>
-                      <span class="nav-link-dot"></span>
-                    </a>
-                  ))}
+              {adminNav.length > 0 && (
+                <div class="nav-group-slim">
+                  <div class="nav-label">Operations</div>
+                  <div class="space-y-1">
+                    {adminNav.map(link => (
+                      <a href={link.href} class:list={['nav-link', currentPath.startsWith(link.href) && 'nav-link-active']}>
+                        <span>{link.label}</span>
+                        <span class="nav-link-dot"></span>
+                      </a>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </nav>
           </aside>
 

@@ -86,8 +86,12 @@
           <a :href="`/agents?campaign=${campaignId}`" class="button-secondary">View in Agent Directory</a>
         </div>
 
-        <div v-if="campaignAgents.length === 0" class="note-box">
-          No agents assigned to this campaign yet.
+        <div v-if="campaignAgents.length === 0" class="empty-state">
+          <div class="text-center space-y-3">
+            <div class="text-base font-semibold text-slate-900">This campaign needs an AI agent</div>
+            <p class="text-sm text-slate-500 max-w-xs mx-auto">An agent handles conversations for this campaign. Add one to start qualifying leads automatically.</p>
+            <a :href="`/agents?campaign=${campaignId}`" class="button-primary inline-flex">Add agent to this campaign</a>
+          </div>
         </div>
 
         <div v-else class="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
