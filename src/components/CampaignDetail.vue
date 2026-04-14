@@ -134,6 +134,44 @@
         </div>
       </section>
 
+      <section class="panel space-y-5">
+        <div>
+          <div class="page-kicker">Booking</div>
+          <h2 class="section-title mt-3">Calendar Assignments</h2>
+          <p class="section-copy mt-2">Select which calendars this campaign's agents can book into.</p>
+        </div>
+
+        <div v-if="calendarsLoading" class="note-box text-xs">Loading calendars...</div>
+
+        <div v-else-if="workspaceCalendars.length === 0" class="note-box text-xs">
+          No calendar targets found. <a href="/calendar" class="text-teal-700 hover:text-teal-800 font-medium">Import calendars</a> first.
+        </div>
+
+        <div v-else class="space-y-2">
+          <label
+            v-for="cal in workspaceCalendars"
+            :key="cal.id"
+            class="flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm transition-colors cursor-pointer"
+            :style="assignedCalendarIds.has(cal.id)
+              ? 'border-color: rgba(13,148,136,0.3); background: rgba(240,253,250,0.7);'
+              : 'border-color: rgba(17,17,17,0.06); background: rgba(251,251,249,0.94);'"
+          >
+            <input
+              type="checkbox"
+              class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+              :checked="assignedCalendarIds.has(cal.id)"
+              :disabled="calendarToggling === cal.id"
+              @change="toggleCalendarAssignment(cal.id, ($event.target as HTMLInputElement).checked)"
+            />
+            <span class="font-medium text-slate-800">{{ cal.name }}</span>
+            <span v-if="cal.booking_url" class="text-xs text-slate-400 truncate max-w-xs">{{ cal.booking_url }}</span>
+          </label>
+        </div>
+
+        <div v-if="calendarAssignSuccess" class="feedback-success text-xs">{{ calendarAssignSuccess }}</div>
+        <div v-if="calendarAssignError" class="feedback-error text-xs">{{ calendarAssignError }}</div>
+      </section>
+
       <section class="space-y-4">
         <div class="flex items-center justify-between">
           <div>
@@ -268,6 +306,7 @@ const API_BASE = '/api';
 
 interface CampaignRecord {
   id: string;
+  workspace_id: string;
   name: string;
   status: string;
   business_hours_json: { timezone: string; schedule: { day: number; start: string; end: string }[] } | null;
@@ -338,6 +377,21 @@ const saving = ref(false);
 const saveError = ref('');
 const saveSuccess = ref('');
 
+// Calendar assignments
+interface CalendarRecord {
+  id: string;
+  name: string;
+  booking_url?: string | null;
+  status?: string;
+}
+
+const workspaceCalendars = ref<CalendarRecord[]>([]);
+const assignedCalendarIds = ref<Set<string>>(new Set());
+const calendarsLoading = ref(false);
+const calendarToggling = ref<string | null>(null);
+const calendarAssignSuccess = ref('');
+const calendarAssignError = ref('');
+
 const metricsByAgent = computed(() => Object.fromEntries((metrics.value?.agent_metrics ?? []).map((item) => [item.agent_id, item])));
 
 function statusClass(status: string): string {
@@ -391,7 +445,7 @@ async function fetchCampaign() {
     };
 
     campaignAgents.value = data.agents ?? [];
-    await fetchMetrics();
+    await Promise.all([fetchMetrics(), fetchCalendars()]);
   } catch {
     // Ignore transient fetch errors and rely on the empty state.
   } finally {
@@ -458,6 +512,86 @@ async function saveCampaign() {
     saveError.value = 'Network error. Please try again.';
   } finally {
     saving.value = false;
+  }
+}
+
+async function fetchCalendars() {
+  if (!campaign.value) return;
+  const wsId = campaign.value.workspace_id;
+  if (!wsId) return;
+  calendarsLoading.value = true;
+
+  try {
+    const [wsRes, campCalRes] = await Promise.all([
+      fetch(`${API_BASE}/api-calendars-list?workspace_id=${wsId}`),
+      fetch(`${API_BASE}/api-campaign-calendars-list?workspace_id=${wsId}&campaign_id=${props.campaignId}`),
+    ]);
+
+    if (wsRes.ok) {
+      workspaceCalendars.value = await wsRes.json();
+    }
+    if (campCalRes.ok) {
+      const assigned: CalendarRecord[] = await campCalRes.json();
+      assignedCalendarIds.value = new Set(assigned.map((c) => c.id));
+    }
+  } finally {
+    calendarsLoading.value = false;
+  }
+}
+
+async function toggleCalendarAssignment(calendarId: string, checked: boolean) {
+  if (!campaign.value) return;
+  const wsId = campaign.value.workspace_id;
+  calendarToggling.value = calendarId;
+  calendarAssignSuccess.value = '';
+  calendarAssignError.value = '';
+
+  try {
+    if (checked) {
+      const res = await fetch(`${API_BASE}/api-campaign-calendars-assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: wsId,
+          campaign_id: props.campaignId,
+          calendar_id: calendarId,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        calendarAssignError.value = data.error || 'Failed to assign calendar';
+        return;
+      }
+
+      assignedCalendarIds.value = new Set([...assignedCalendarIds.value, calendarId]);
+      calendarAssignSuccess.value = 'Calendar assigned';
+    } else {
+      const res = await fetch(`${API_BASE}/api-campaign-calendars-remove`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: wsId,
+          campaign_id: props.campaignId,
+          calendar_id: calendarId,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        calendarAssignError.value = data.error || 'Failed to remove calendar';
+        return;
+      }
+
+      const next = new Set(assignedCalendarIds.value);
+      next.delete(calendarId);
+      assignedCalendarIds.value = next;
+      calendarAssignSuccess.value = 'Calendar removed';
+    }
+  } catch {
+    calendarAssignError.value = 'Network error. Please try again.';
+  } finally {
+    calendarToggling.value = null;
   }
 }
 

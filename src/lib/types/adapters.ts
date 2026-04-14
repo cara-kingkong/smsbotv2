@@ -37,6 +37,8 @@ export interface AIPromptContext {
   conversation_history: Pick<Message, 'direction' | 'sender_type' | 'body_text'>[];
   lead: Pick<Lead, 'first_name' | 'last_name' | 'timezone'>;
   available_calendar_ids: string[];
+  available_calendars: Array<{ id: string; name: string }>;
+  available_slots?: string[];
   rules: Record<string, unknown>;
 }
 
@@ -66,16 +68,21 @@ export interface CRMAdapter {
 
 export interface BookingInput {
   calendar_id: string;
+  start_time: string;
   lead_name: string;
   lead_email: string;
   lead_phone: string;
-  notes?: string;
+  lead_timezone?: string;
+  lead_company?: string;
 }
 
 export interface BookingResult {
   booking_id: string;
   booking_url: string;
   scheduled_at: string;
+  event_uri?: string;
+  cancel_url?: string;
+  reschedule_url?: string;
   raw_response: Record<string, unknown>;
 }
 

@@ -19,9 +19,11 @@ import {
   ConversationEventType,
 } from '../../src/lib/types';
 import { CRMService } from '../../src/lib/crm/service';
-import type { AIProviderAdapter } from '../../src/lib/types';
+import type { AIProviderAdapter, Calendar } from '../../src/lib/types';
+import { CalendlyAdapter } from '../../src/lib/calendar/adapters/calendly';
 import { isWithinBusinessHours, getNextBusinessHoursStart } from '../../src/lib/utils/business-hours';
 import { evaluateStopConditions } from '../../src/lib/utils/stop-conditions';
+import { detectBookingAcceptance } from '../../src/lib/utils/booking-guard';
 import { runQueueJob } from '../../src/lib/queues/job-runner';
 
 interface ProcessAIReplyPayload {
@@ -109,12 +111,31 @@ export default async (req: Request, _context: Context) =>
 
     const stopResult = await evaluateStopConditions(db, conversation, effectiveStopConditions);
     if (stopResult.should_stop) {
-      await conversationService.setOutcome(conversation_id, ConversationOutcome.NoResponse);
+      // Preserve qualification-aware outcome if a prior AI run already assessed
+      // the lead; only default to NoResponse when no outcome has been set.
+      if (!conversation.outcome) {
+        const { data: lastDecision } = await db
+          .from('ai_decisions')
+          .select('decision_json')
+          .eq('conversation_id', conversation_id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const qualState = (lastDecision?.decision_json as Record<string, unknown>)?.qualification_state;
+        const outcome = qualState === 'qualified'
+          ? ConversationOutcome.QualifiedNotBooked
+          : qualState === 'unqualified'
+            ? ConversationOutcome.Unqualified
+            : ConversationOutcome.NoResponse;
+
+        await conversationService.setOutcome(conversation_id, outcome);
+      }
       await conversationService.updateStatus(conversation_id, ConversationStatus.Completed);
       await db.from('conversation_events').insert({
         conversation_id,
         event_type: ConversationEventType.StopConditionReached,
-        event_payload_json: { reason: stopResult.reason },
+        event_payload_json: { reason: stopResult.reason, preserved_outcome: conversation.outcome ?? null },
       });
       return new Response('Stopped', { status: 200 });
     }
@@ -150,7 +171,7 @@ export default async (req: Request, _context: Context) =>
 
     const aiService = new AIService(db, aiAdapters);
     const bookingService = new BookingService(db, null as never);
-    const calendars = await bookingService.getCalendarsForAgent(conversation.agent_id);
+    const calendars = await bookingService.getCalendarsForCampaign(conversation.campaign_id);
 
     let providerKey = 'openai';
     if (version.config_json && typeof version.config_json === 'object' && 'provider' in version.config_json) {
@@ -160,12 +181,30 @@ export default async (req: Request, _context: Context) =>
       providerKey = aiAdapters.keys().next().value ?? 'openai';
     }
 
+    if (calendars.length === 0) {
+      console.warn(`Campaign ${conversation.campaign_id} has no calendars assigned — booking will require human intervention`);
+    }
+
+    // Check for previously offered slots so the AI can reference them
+    const { data: priorSlotsEvent } = await db
+      .from('conversation_events')
+      .select('event_payload_json')
+      .eq('conversation_id', conversation_id)
+      .eq('event_type', ConversationEventType.SlotsOffered)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const previouslyOfferedSlots = (priorSlotsEvent?.event_payload_json as Record<string, unknown>)?.slots as string[] | undefined;
+
     await heartbeat();
     const decision = await aiService.generateReply({
       agent_version: version,
       conversation_history: history,
       lead,
       available_calendar_ids: calendars.map((c) => c.id),
+      available_calendars: calendars.map((c) => ({ id: c.id, name: c.name })),
+      available_slots: previouslyOfferedSlots,
       provider_key: providerKey,
     });
 
@@ -191,16 +230,165 @@ export default async (req: Request, _context: Context) =>
         should_reply: decision.should_reply,
         qualification_state: decision.qualification_state,
         escalate_to_human: decision.escalate_to_human,
+        should_offer_times: decision.should_offer_times,
         should_book: decision.should_book,
+        confirmed_time: decision.confirmed_time,
       },
     });
 
+    // ── Persist qualification outcome so it rolls up to dashboard ──
+    // Booked takes precedence; otherwise promote the AI's assessment.
+    if (
+      decision.qualification_state === 'qualified' &&
+      conversation.outcome !== ConversationOutcome.Booked
+    ) {
+      await conversationService.setOutcome(conversation_id, ConversationOutcome.QualifiedNotBooked);
+    } else if (
+      decision.qualification_state === 'unqualified' &&
+      !conversation.outcome
+    ) {
+      await conversationService.setOutcome(conversation_id, ConversationOutcome.Unqualified);
+    }
+
+    // ── Phase 1: Offer available time slots ──────────────────────
+    if (decision.should_offer_times && !decision.should_book && calendars.length > 0) {
+      const slotsCalendar = calendars[0];
+      const isReOffer = !!priorSlotsEvent;
+      const allSlots = await fetchAllCalendlySlots(db, slotsCalendar);
+      const offeredSlots = isReOffer
+        ? spreadSlots(allSlots, 3)
+        : pickInitialSlots(allSlots, lead.timezone);
+
+      if (offeredSlots.length > 0) {
+        const formatted = isReOffer
+          ? formatSlotsFallback(offeredSlots, lead.timezone)
+          : formatSlotsInitial(offeredSlots, lead.timezone);
+        const combinedReply = decision.reply_text
+          ? `${decision.reply_text}\n\n${formatted}`
+          : formatted;
+
+        await heartbeat();
+        const message = await messagingService.sendOutbound({
+          conversation_id,
+          to: lead.phone_e164,
+          from: process.env.TWILIO_PHONE_NUMBER!,
+          body_text: combinedReply,
+          sender_type: SenderType.AI,
+          source_job_id: jobId,
+        });
+
+        await db.from('ai_decisions')
+          .update({ message_id: message.id })
+          .eq('conversation_id', conversation_id)
+          .is('message_id', null)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        await db.from('conversation_events').insert({
+          conversation_id,
+          event_type: ConversationEventType.SlotsOffered,
+          event_payload_json: {
+            calendar_id: slotsCalendar.id,
+            calendar_name: slotsCalendar.name,
+            slots: offeredSlots,
+            slot_count: offeredSlots.length,
+          },
+        });
+
+        await conversationService.updateStatus(conversation_id, ConversationStatus.WaitingForLead);
+        return new Response('Slots offered', { status: 200 });
+      }
+      // If no slots available, fall through to let the AI reply go out normally
+      console.warn(`No available slots found for calendar ${slotsCalendar.id} — falling through`);
+    }
+
+    // ── Cancel existing booking if requested ───────────────────
+    if (decision.should_cancel_booking) {
+      const { data: bookingRefs } = await db
+        .from('conversation_events')
+        .select('event_payload_json')
+        .eq('conversation_id', conversation_id)
+        .eq('event_type', 'booking_reference')
+        .order('created_at', { ascending: false });
+
+      let cancelled = false;
+      if (bookingRefs && bookingRefs.length > 0) {
+        // Get a Calendly adapter to perform the cancellation
+        const cancelCalendar = calendars[0];
+        if (cancelCalendar) {
+          const { data: calIntegration } = await db
+            .from('integrations')
+            .select('config_json')
+            .eq('id', cancelCalendar.integration_id)
+            .maybeSingle();
+
+          const calConfig = (calIntegration?.config_json ?? {}) as Record<string, unknown>;
+          const calApiKeyRef = String(calConfig.api_key_ref ?? 'CALENDLY_API_KEY');
+          const calApiKey = process.env[calApiKeyRef];
+
+          if (calApiKey) {
+            const cancelAdapter = new CalendlyAdapter(calApiKey);
+            for (const ref of bookingRefs) {
+              const eventUri = (ref.event_payload_json as Record<string, unknown>)?.event_uri as string | undefined;
+              if (eventUri) {
+                const result = await cancelAdapter.cancelBooking(eventUri);
+                if (result.success) {
+                  cancelled = true;
+                  await db.from('conversation_events').insert({
+                    conversation_id,
+                    event_type: 'booking_cancelled',
+                    event_payload_json: { event_uri: eventUri, reason: 'lead_requested' },
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+
+      console.log(`[Cancel] Booking cancellation for ${conversation_id}: ${cancelled ? 'success' : 'no booking found'}`);
+    }
+
+    const bookingAcceptance = detectBookingAcceptance(history);
+    let tookAction = false;
+
     if (decision.escalate_to_human) {
-      await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
-      return new Response('Escalated', { status: 200 });
+      // If the AI wants to escalate but also wants to book or offer times, and we
+      // can resolve a calendar, suppress the escalation and continue the booking flow.
+      const resolvedCalendarId = decision.recommended_calendar_id
+        ?? (calendars.length > 0 ? calendars[0].id : null);
+
+      if ((decision.should_book || decision.should_offer_times) && resolvedCalendarId) {
+        decision.escalate_to_human = false;
+        decision.recommended_calendar_id = resolvedCalendarId;
+      } else {
+        await db.from('conversation_events').insert({
+          conversation_id,
+          event_type: 'booking_needs_human',
+          event_payload_json: {
+            reason: 'ai_escalation',
+            should_book: decision.should_book,
+            recommended_calendar_id: decision.recommended_calendar_id,
+          },
+        });
+        await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
+        try {
+          await queueSystemMessage(queueService, db, {
+            workspaceId: conversation.workspace_id,
+            conversationId: conversation_id,
+            to: lead.phone_e164,
+            bodyText: 'Thanks, I am handing this off so we can confirm the booking details for you.',
+            sourceJobId: undefined,
+          });
+        } catch (err) {
+          console.error('Failed to queue escalation SMS:', err);
+        }
+        return new Response('Escalated', { status: 200 });
+      }
     }
 
     if (decision.should_reply && decision.reply_text) {
+      tookAction = true;
       await heartbeat();
       const message = await messagingService.sendOutbound({
         conversation_id,
@@ -242,7 +430,24 @@ export default async (req: Request, _context: Context) =>
       }
     }
 
+    let bookingQueued = false;
+
+    // Resolve calendar when AI says book but didn't pick one
+    if (decision.should_book && !decision.recommended_calendar_id && calendars.length > 0) {
+      decision.recommended_calendar_id = calendars[0].id;
+    }
+
     if (decision.should_book && decision.recommended_calendar_id) {
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: 'booking_queued',
+        event_payload_json: {
+          source: 'ai_decision',
+          recommended_calendar_id: decision.recommended_calendar_id,
+          confirmed_time: decision.confirmed_time,
+          qualification_state: decision.qualification_state,
+        },
+      });
       await queueService.enqueue({
         workspace_id: conversation.workspace_id,
         job_type: 'process_booking',
@@ -250,10 +455,133 @@ export default async (req: Request, _context: Context) =>
         payload: {
           conversation_id,
           recommended_calendar_id: decision.recommended_calendar_id,
+          confirmed_time: decision.confirmed_time,
           lead_id: lead.id,
           agent_id: conversation.agent_id,
+          campaign_id: conversation.campaign_id,
         },
       });
+      bookingQueued = true;
+      tookAction = true;
+    } else if (decision.should_book && !decision.recommended_calendar_id) {
+      // AI wants to book but no calendar could be resolved
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: 'booking_needs_human',
+        event_payload_json: {
+          reason: calendars.length === 0 ? 'no_assigned_calendar' : 'ambiguous_calendar_selection',
+          should_book: true,
+          available_calendars: calendars.map((c) => c.id),
+        },
+      });
+      await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
+      if (!tookAction) {
+        try {
+          await queueSystemMessage(queueService, db, {
+            workspaceId: conversation.workspace_id,
+            conversationId: conversation_id,
+            to: lead.phone_e164,
+            bodyText: 'Thanks, a team member will confirm the booking details for you shortly.',
+            sourceJobId: undefined,
+          });
+        } catch (err) {
+          console.error('Failed to queue booking-needs-human SMS:', err);
+        }
+      }
+      return new Response('Booking needs human — no resolvable calendar', { status: 200 });
+    } else if (
+      bookingAcceptance.acceptanceDetected &&
+      calendars.length > 0
+    ) {
+      const fallbackCalendarId = calendars[0].id;
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: 'booking_acceptance_detected',
+        event_payload_json: {
+          source: 'deterministic_fallback',
+          evidence: bookingAcceptance.evidence,
+          fallback_calendar_id: fallbackCalendarId,
+          qualification_state: decision.qualification_state,
+        },
+      });
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: 'booking_queued',
+        event_payload_json: {
+          source: 'deterministic_fallback',
+          recommended_calendar_id: fallbackCalendarId,
+          evidence: bookingAcceptance.evidence,
+        },
+      });
+      await queueService.enqueue({
+        workspace_id: conversation.workspace_id,
+        job_type: 'process_booking',
+        queue_name: 'booking',
+        payload: {
+          conversation_id,
+          recommended_calendar_id: fallbackCalendarId,
+          lead_id: lead.id,
+          agent_id: conversation.agent_id,
+          campaign_id: conversation.campaign_id,
+        },
+      });
+      bookingQueued = true;
+      tookAction = true;
+    } else if (bookingAcceptance.acceptanceDetected) {
+      // No calendars at all — escalate, but only send a system message
+      // if the AI didn't already reply (avoid double messages).
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: 'booking_needs_human',
+        event_payload_json: {
+          reason: 'no_assigned_calendar',
+          evidence: bookingAcceptance.evidence,
+          available_calendars: [],
+        },
+      });
+      await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
+      if (!tookAction) {
+        try {
+          await queueSystemMessage(queueService, db, {
+            workspaceId: conversation.workspace_id,
+            conversationId: conversation_id,
+            to: lead.phone_e164,
+            bodyText: 'Thanks, we have your preferred time. A team member will confirm the booking details shortly.',
+            sourceJobId: undefined,
+          });
+        } catch (err) {
+          console.error('Failed to queue booking-acceptance SMS:', err);
+        }
+      }
+      return new Response('Needs human', { status: 200 });
+    }
+
+    if (!tookAction && trigger === 'inbound_message') {
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: 'ai_no_action',
+        event_payload_json: {
+          qualification_state: decision.qualification_state,
+          should_reply: decision.should_reply,
+          should_book: decision.should_book,
+          recommended_calendar_id: decision.recommended_calendar_id,
+          acceptance_detected: bookingAcceptance.acceptanceDetected,
+          evidence: bookingAcceptance.evidence,
+        },
+      });
+      await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
+      try {
+        await queueSystemMessage(queueService, db, {
+          workspaceId: conversation.workspace_id,
+          conversationId: conversation_id,
+          to: lead.phone_e164,
+          bodyText: 'Thanks for the message. A team member is reviewing the next step and will follow up shortly.',
+          sourceJobId: undefined,
+        });
+      } catch (err) {
+        console.error('Failed to queue ai-no-action SMS:', err);
+      }
+      return new Response('Needs human', { status: 200 });
     }
 
     const crmEventType =
@@ -305,5 +633,241 @@ export default async (req: Request, _context: Context) =>
       }
     }
 
+    if (bookingQueued && !decision.should_reply) {
+      await conversationService.updateStatus(conversation_id, ConversationStatus.Active);
+    }
+
     return new Response('OK', { status: 200 });
   });
+
+async function queueSystemMessage(
+  queueService: {
+    enqueue: (input: {
+      workspace_id: string;
+      job_type: string;
+      queue_name: string;
+      payload: Record<string, unknown>;
+    }) => Promise<unknown>;
+  },
+  db: {
+    from: (table: string) => {
+      select: () => unknown;
+      insert: (data: Record<string, unknown>) => {
+        select: () => { single: () => Promise<{ data: { id: string } | null; error: { message: string } | null }> };
+      };
+      update?: () => unknown;
+      eq?: () => unknown;
+    };
+  },
+  input: {
+    workspaceId: string;
+    conversationId: string;
+    to: string;
+    bodyText: string;
+    sourceJobId?: string;
+  },
+) {
+  if (!process.env.TWILIO_PHONE_NUMBER) return;
+
+  const messagingService = new MessagingService(db as never, {} as never);
+  const message = await messagingService.queueOutbound({
+    conversation_id: input.conversationId,
+    body_text: input.bodyText,
+    sender_type: SenderType.System,
+    source_job_id: input.sourceJobId,
+  });
+
+  await queueService.enqueue({
+    workspace_id: input.workspaceId,
+    job_type: 'process_send_sms',
+    queue_name: 'sms',
+    payload: {
+      message_id: message.id,
+      conversation_id: input.conversationId,
+      to: input.to,
+      from: process.env.TWILIO_PHONE_NUMBER,
+    },
+  });
+}
+
+/** Fetch all available Calendly slots for the next 7 days (raw, unpicked) */
+async function fetchAllCalendlySlots(
+  db: { from: (table: string) => ReturnType<import('@supabase/supabase-js').SupabaseClient['from']> },
+  calendar: Calendar,
+): Promise<string[]> {
+  if (!calendar.integration_id) return [];
+
+  const { data: integration } = await db
+    .from('integrations')
+    .select('config_json')
+    .eq('id', calendar.integration_id)
+    .maybeSingle();
+
+  if (!integration) return [];
+
+  const config = (integration.config_json ?? {}) as Record<string, unknown>;
+  const apiKeyRef = String(config.api_key_ref ?? 'CALENDLY_API_KEY');
+  const apiKey = process.env[apiKeyRef];
+  if (!apiKey) return [];
+
+  const eventTypeUri = calendar.external_calendar_id ?? calendar.booking_url;
+  if (!eventTypeUri) return [];
+
+  try {
+    const adapter = new CalendlyAdapter(apiKey);
+    const start = new Date(Date.now() + 5 * 60 * 1000); // 5 min buffer so Calendly accepts it
+    const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const result = await adapter.listAvailableSlots(eventTypeUri, {
+      start: start.toISOString(),
+      end: end.toISOString(),
+    });
+    return result.slots;
+  } catch (err) {
+    console.warn('Failed to fetch Calendly slots:', err);
+    return [];
+  }
+}
+
+/** Get the weekday date string for a slot in the lead's timezone */
+function slotDate(iso: string, tz: string): string {
+  return new Date(iso).toLocaleDateString('en-AU', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
+function slotDayOfWeek(iso: string, tz: string): number {
+  const parts = new Intl.DateTimeFormat('en-AU', { timeZone: tz, weekday: 'short' }).formatToParts(new Date(iso));
+  const wd = parts.find(p => p.type === 'weekday')?.value ?? '';
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(wd);
+}
+
+/**
+ * Initial offer: 2 slots from the next available weekday, 1 from the following weekday.
+ * Slots on each day are spread at least 2 hours apart.
+ */
+function pickInitialSlots(allSlots: string[], leadTimezone?: string | null): string[] {
+  const tz = leadTimezone ?? 'Australia/Melbourne';
+  if (allSlots.length === 0) return [];
+
+  // Group slots by date in lead's timezone, weekdays only
+  const byDay = new Map<string, string[]>();
+  for (const iso of allSlots) {
+    const dow = slotDayOfWeek(iso, tz);
+    if (dow === 0 || dow === 6) continue; // skip weekends
+    const key = slotDate(iso, tz);
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key)!.push(iso);
+  }
+
+  // Get today's date in lead's tz so we skip it
+  const todayKey = slotDate(new Date().toISOString(), tz);
+  const days = [...byDay.keys()].filter(d => d !== todayKey).sort();
+
+  if (days.length === 0) return spreadSlots(allSlots, 3); // fallback
+
+  const picked: string[] = [];
+
+  // Day 1: pick 2 spread-out slots (at least 2 hours apart)
+  const day1Slots = byDay.get(days[0]) ?? [];
+  if (day1Slots.length > 0) {
+    picked.push(day1Slots[0]);
+    for (const slot of day1Slots) {
+      if (new Date(slot).getTime() - new Date(picked[0]).getTime() >= 2 * 60 * 60 * 1000) {
+        picked.push(slot);
+        break;
+      }
+    }
+  }
+
+  // Day 2: pick 1 slot
+  if (days.length > 1) {
+    const day2Slots = byDay.get(days[1]) ?? [];
+    if (day2Slots.length > 0) picked.push(day2Slots[0]);
+  }
+
+  return picked.length > 0 ? picked : spreadSlots(allSlots, 3);
+}
+
+/** Fallback: pick slots spread at least 1 hour apart (for re-offers) */
+function spreadSlots(allSlots: string[], count: number): string[] {
+  if (allSlots.length === 0) return [];
+  const picked: string[] = [allSlots[0]];
+
+  for (let i = 1; i < allSlots.length && picked.length < count; i++) {
+    const lastPicked = new Date(picked[picked.length - 1]).getTime();
+    const candidate = new Date(allSlots[i]).getTime();
+    if (candidate - lastPicked >= 60 * 60 * 1000) {
+      picked.push(allSlots[i]);
+    }
+  }
+  return picked;
+}
+
+function formatTime(iso: string, tz: string): string {
+  return new Date(iso).toLocaleTimeString('en-AU', {
+    timeZone: tz,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).replace(':00', '').replace(' ', '').toLowerCase(); // "2pm" not "2:00 PM"
+}
+
+function formatDayName(iso: string, tz: string): string {
+  return new Date(iso).toLocaleDateString('en-AU', { timeZone: tz, weekday: 'long' });
+}
+
+function isTomorrow(iso: string, tz: string): boolean {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return slotDate(iso, tz) === slotDate(tomorrow.toISOString(), tz);
+}
+
+/**
+ * Initial format: "I've got 10am or 2pm tomorrow, or 11am Wednesday if that
+ * suits better (Melbourne time) - which works?"
+ */
+function formatSlotsInitial(slots: string[], leadTimezone?: string | null): string {
+  const tz = leadTimezone ?? 'Australia/Melbourne';
+  if (slots.length === 0) return '';
+
+  // Group by day
+  const byDay = new Map<string, string[]>();
+  for (const s of slots) {
+    const key = slotDate(s, tz);
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key)!.push(s);
+  }
+
+  const dayGroups = [...byDay.entries()];
+  const parts: string[] = [];
+
+  for (const [, daySlots] of dayGroups) {
+    const dayLabel = isTomorrow(daySlots[0], tz) ? 'tomorrow' : formatDayName(daySlots[0], tz);
+    const times = daySlots.map(s => formatTime(s, tz));
+    if (times.length === 1) {
+      parts.push(`${times[0]} ${dayLabel}`);
+    } else {
+      parts.push(`${times.join(' or ')} ${dayLabel}`);
+    }
+  }
+
+  if (parts.length === 1) {
+    return `I've got ${parts[0]} available (Melbourne time) - does that work?`;
+  }
+
+  const last = parts.pop();
+  return `I've got ${parts.join(', ')}, or ${last} if that suits better (Melbourne time) - which works?`;
+}
+
+/** Fallback format for re-offers (wider range, used after lead rejects initial times) */
+function formatSlotsFallback(slots: string[], leadTimezone?: string | null): string {
+  const tz = leadTimezone ?? 'Australia/Melbourne';
+
+  const formatSlot = (iso: string) => `${formatTime(iso, tz)} ${formatDayName(iso, tz)}`;
+
+  if (slots.length === 1) {
+    return `I've got ${formatSlot(slots[0])} available (Melbourne time) - does that work?`;
+  }
+
+  const formatted = slots.map(formatSlot);
+  const last = formatted.pop();
+  return `I've got ${formatted.join(', ')}, or ${last} available (Melbourne time) - which suits?`;
+}

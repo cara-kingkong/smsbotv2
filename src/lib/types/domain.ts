@@ -106,6 +106,9 @@ export interface ReplyCadence {
   initial_delay_seconds: number;
   followup_delay_seconds: number;
   max_followups: number;
+  /** Seconds to wait for additional rapid-fire messages before generating a reply.
+   *  Each new inbound message resets the timer. Default 8s. */
+  coalesce_window_seconds?: number;
 }
 
 export interface AllowedActions {
@@ -165,6 +168,14 @@ export interface AgentCalendar {
   id: string;
   workspace_id: string;
   agent_id: string;
+  calendar_id: string;
+  created_at: string;
+}
+
+export interface CampaignCalendar {
+  id: string;
+  workspace_id: string;
+  campaign_id: string;
   calendar_id: string;
   created_at: string;
 }
@@ -303,7 +314,10 @@ export interface AIDecision {
   should_reply: boolean;
   reply_text: string;
   qualification_state: QualificationState;
+  should_offer_times: boolean;
   should_book: boolean;
+  should_cancel_booking: boolean;
+  confirmed_time: string | null;
   recommended_calendar_id: string | null;
   escalate_to_human: boolean;
   tags_to_emit: string[];

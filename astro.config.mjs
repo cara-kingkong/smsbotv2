@@ -8,6 +8,7 @@ export default defineConfig({
   adapter: netlify(),
   integrations: [vue()],
   security: { checkOrigin: false },
+  devToolbar: { enabled: false },
   server: { host: true },
   vite: {
     plugins: [tailwindcss()],

@@ -168,7 +168,12 @@
 
               <fieldset class="panel-muted space-y-4">
                 <legend class="form-label">Reply Cadence</legend>
-                <div class="grid gap-4 sm:grid-cols-3">
+                <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <div>
+                    <label class="form-label">Message Window (s)</label>
+                    <input v-model.number="versionForm.coalesce_window_seconds" type="number" min="0" max="30" class="input" />
+                    <p class="mt-1 text-xs text-slate-500">Wait for rapid-fire messages</p>
+                  </div>
                   <div>
                     <label class="form-label">Initial Delay (s)</label>
                     <input v-model.number="versionForm.initial_delay_seconds" type="number" min="0" class="input" />
@@ -338,42 +343,11 @@
             <div>
               <div class="page-kicker">Booking</div>
               <h2 class="section-title mt-3">Calendar Assignments</h2>
-              <p class="section-copy mt-2">Select which calendars this agent can book into.</p>
+              <p class="section-copy mt-2">Calendars are now assigned at the campaign level.</p>
             </div>
-
-            <div v-if="calendarsLoading" class="note-box text-xs">Loading calendars...</div>
-
-            <div v-else-if="workspaceCalendars.length === 0" class="note-box text-xs">
-              No calendar targets found. <a href="/calendar" class="text-teal-700 hover:text-teal-800 font-medium">Import calendars</a> first.
+            <div class="note-box text-xs">
+              Manage calendar assignments from the <a :href="agent?.campaign_id ? `/campaigns/${agent.campaign_id}` : '/campaigns'" class="text-teal-700 hover:text-teal-800 font-medium">Campaign detail page</a>.
             </div>
-
-            <div v-else class="space-y-2">
-              <label
-                v-for="cal in workspaceCalendars"
-                :key="cal.id"
-                class="flex items-start gap-3 rounded-[12px] border px-3 py-3 text-sm text-slate-700 cursor-pointer"
-                :style="assignedCalendarIds.has(cal.id)
-                  ? 'border-color: rgba(22,163,74,0.2); background: rgba(22,163,74,0.04);'
-                  : 'border-color: rgba(17,17,17,0.06); background: rgba(251,251,249,0.94);'"
-              >
-                <input
-                  type="checkbox"
-                  :checked="assignedCalendarIds.has(cal.id)"
-                  class="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                  :disabled="calendarToggling === cal.id"
-                  @change="toggleCalendarAssignment(cal.id, ($event.target as HTMLInputElement).checked)"
-                />
-                <div class="min-w-0">
-                  <div class="font-medium">{{ cal.name }}</div>
-                  <div class="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
-                    <span class="badge text-[9px] px-1.5 py-0.5" :class="cal.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'">{{ cal.status }}</span>
-                  </div>
-                </div>
-              </label>
-            </div>
-
-            <div v-if="calendarAssignSuccess" class="feedback-success text-xs">{{ calendarAssignSuccess }}</div>
-            <div v-if="calendarAssignError" class="feedback-error text-xs">{{ calendarAssignError }}</div>
           </section>
         </aside>
       </div>
@@ -420,6 +394,7 @@ interface PromptFields {
   prompt_text: string;
   tone: string;
   max_message_length: number;
+  coalesce_window_seconds: number;
   initial_delay_seconds: number;
   followup_delay_seconds: number;
   max_followups: number;
@@ -435,6 +410,7 @@ const DEFAULT_PROMPT_FIELDS: PromptFields = {
   prompt_text: '',
   tone: 'friendly',
   max_message_length: 160,
+  coalesce_window_seconds: 8,
   initial_delay_seconds: 30,
   followup_delay_seconds: 3600,
   max_followups: 5,
@@ -470,6 +446,12 @@ interface CalendarRecord {
   id: string;
   name: string;
   status: string;
+  settings_json?: Record<string, unknown>;
+}
+
+function calLabel(cal: CalendarRecord): string {
+  const label = cal.settings_json?.label;
+  return typeof label === 'string' && label ? label : cal.name;
 }
 
 const workspaceCalendars = ref<CalendarRecord[]>([]);
@@ -504,6 +486,7 @@ function normalizeVersion(version?: VersionRecord | null): PromptFields {
     prompt_text: version.prompt_text ?? '',
     tone: String(systemRules.tone ?? 'friendly'),
     max_message_length: Number(systemRules.max_message_length ?? 160),
+    coalesce_window_seconds: Number(cadence.coalesce_window_seconds ?? 8),
     initial_delay_seconds: Number(cadence.initial_delay_seconds ?? 30),
     followup_delay_seconds: Number(cadence.followup_delay_seconds ?? 3600),
     max_followups: Number(cadence.max_followups ?? 5),
@@ -526,6 +509,7 @@ function promptFingerprint(fields: PromptFields): string {
     prompt_text: fields.prompt_text,
     tone: fields.tone,
     max_message_length: fields.max_message_length,
+    coalesce_window_seconds: fields.coalesce_window_seconds,
     initial_delay_seconds: fields.initial_delay_seconds,
     followup_delay_seconds: fields.followup_delay_seconds,
     max_followups: fields.max_followups,
@@ -546,6 +530,7 @@ function buildVersionPayload(fields: PromptFields) {
       max_message_length: fields.max_message_length,
     },
     reply_cadence_json: {
+      coalesce_window_seconds: fields.coalesce_window_seconds,
       initial_delay_seconds: fields.initial_delay_seconds,
       followup_delay_seconds: fields.followup_delay_seconds,
       max_followups: fields.max_followups,

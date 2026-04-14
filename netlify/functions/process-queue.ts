@@ -71,6 +71,7 @@ function getHandlerUrl(jobType: string, baseUrl: string): string | null {
   const handlers: Record<string, string> = {
     generate_ai_reply: `${baseUrl}/api/process-ai-reply-background`,
     send_sms: `${baseUrl}/api/process-send-sms-background`,
+    process_send_sms: `${baseUrl}/api/process-send-sms-background`,
     process_booking: `${baseUrl}/api/process-booking-background`,
     process_crm_sync: `${baseUrl}/api/process-crm-sync-background`,
   };

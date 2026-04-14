@@ -34,6 +34,9 @@ export default async (req: Request, _context: Context) => {
       ConversationStatus.WaitingForLead,
       ConversationStatus.PausedBusinessHours,
       ConversationStatus.PausedManual,
+      ConversationStatus.Completed,
+      ConversationStatus.OptedOut,
+      ConversationStatus.Failed,
     ];
 
     if (statusFilter && !allowedStatuses.includes(statusFilter as ConversationStatus)) {
@@ -54,9 +57,9 @@ export default async (req: Request, _context: Context) => {
       .order('last_activity_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    query = statusFilter
-      ? query.eq('status', statusFilter)
-      : query.in('status', allowedStatuses);
+    if (statusFilter) {
+      query = query.eq('status', statusFilter);
+    }
 
     const { data: conversations, error } = await query;
     if (error) throw new Error(`Failed to list inbox conversations: ${error.message}`);

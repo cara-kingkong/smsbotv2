@@ -129,6 +129,30 @@ export class QueueService {
       .contains('payload_json', { conversation_id: conversationId });
   }
 
+  /**
+   * Cancel only pending AI reply jobs for a conversation.
+   * Used by the inbound-message debounce: each new rapid-fire message
+   * cancels the waiting job so a fresh one can be enqueued with a reset timer.
+   * Only targets `pending` status to avoid touching jobs already being processed.
+   */
+  async cancelPendingAIReplies(conversationId: string): Promise<number> {
+    const { data } = await this.db
+      .from('jobs')
+      .update({
+        status: JobStatus.Cancelled,
+        lease_expires_at: null,
+        worker_id: null,
+        heartbeat_at: null,
+        completed_at: new Date().toISOString(),
+      })
+      .eq('status', JobStatus.Pending)
+      .eq('job_type', 'generate_ai_reply')
+      .contains('payload_json', { conversation_id: conversationId })
+      .select('id');
+
+    return data?.length ?? 0;
+  }
+
   async listDeadLettered(queueName?: string): Promise<Job[]> {
     let query = this.db
       .from('jobs')

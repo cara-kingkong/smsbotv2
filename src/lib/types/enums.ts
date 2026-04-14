@@ -106,6 +106,7 @@ export enum ConversationEventType {
   AIReplyGenerated = 'ai_reply_generated',
   StopConditionReached = 'stop_condition_reached',
   QualificationChanged = 'qualification_changed',
+  SlotsOffered = 'slots_offered',
   BookingInitiated = 'booking_initiated',
   BookingConfirmed = 'booking_confirmed',
   BookingFailed = 'booking_failed',

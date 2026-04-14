@@ -1,6 +1,6 @@
 <template>
   <div
-    class="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]"
+    class="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)_340px]"
     style="min-height: calc(100vh - 280px);"
   >
     <aside class="panel flex min-h-[520px] flex-col overflow-hidden p-0">
@@ -77,6 +77,9 @@
                 <span class="badge" :class="statusClass(selected.status)">
                   {{ selected.status.replace(/_/g, ' ') }}
                 </span>
+                <span v-if="selected.outcome" class="badge bg-emerald-50 text-emerald-700">
+                  {{ selected.outcome.replace(/_/g, ' ') }}
+                </span>
               </div>
               <p class="mt-2 text-sm text-slate-500">{{ selected.lead?.phone_e164 ?? '' }}</p>
             </div>
@@ -98,12 +101,30 @@
               >
                 {{ actionLoading ? 'Taking over...' : 'Take Over' }}
               </button>
+              <template v-if="confirmingDelete">
+                <span class="text-sm font-medium text-red-600">Delete this conversation?</span>
+                <button
+                  class="button-secondary !text-red-600 hover:!bg-red-50"
+                  :disabled="actionLoading"
+                  @click="executeDelete"
+                >
+                  {{ actionLoading ? 'Deleting...' : 'Confirm' }}
+                </button>
+                <button
+                  class="button-secondary"
+                  :disabled="actionLoading"
+                  @click="confirmingDelete = false"
+                >
+                  Cancel
+                </button>
+              </template>
               <button
+                v-else
                 class="button-secondary !text-red-600 hover:!bg-red-50"
                 :disabled="actionLoading"
-                @click="confirmDelete"
+                @click="confirmingDelete = true"
               >
-                {{ actionLoading ? 'Deleting...' : 'Delete' }}
+                Delete
               </button>
             </div>
           </div>
@@ -141,6 +162,9 @@
                 <div>{{ msg.body_text }}</div>
                 <div class="mt-2 text-[11px] font-semibold uppercase tracking-[0.14em]" :class="metaClass(msg)">
                   {{ senderLabel(msg.sender_type) }} · {{ formatTime(msg.sent_at ?? msg.received_at ?? msg.created_at) }}
+                  <template v-if="msg.direction === 'outbound' && msg.provider_status">
+                    · {{ msg.provider_status }}
+                  </template>
                 </div>
               </div>
             </div>
@@ -175,12 +199,15 @@
         </div>
       </template>
     </section>
+
+    <ConversationDiagnosticsPanel :conversation-id="selected?.id ?? null" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { getSessionContext } from '@lib/config/public-client';
+import ConversationDiagnosticsPanel from './ConversationDiagnosticsPanel.vue';
 
 const API_BASE = '/api';
 
@@ -195,6 +222,7 @@ interface Lead {
 interface Conv {
   id: string;
   status: string;
+  outcome: string | null;
   human_controlled: boolean;
   needs_human: boolean;
   last_activity_at: string;
@@ -207,6 +235,7 @@ interface Msg {
   direction: string;
   sender_type: string;
   body_text: string;
+  provider_status: string | null;
   sent_at: string | null;
   received_at: string | null;
   created_at: string;
@@ -217,6 +246,7 @@ const filters = [
   { label: 'Active', value: 'active' },
   { label: 'Needs Human', value: 'needs_human' },
   { label: 'Human Controlled', value: 'human_controlled' },
+  { label: 'Completed', value: 'completed' },
 ];
 
 const loading = ref(true);
@@ -231,9 +261,9 @@ const messagesError = ref('');
 const replyText = ref('');
 const sendLoading = ref(false);
 const actionLoading = ref(false);
+const confirmingDelete = ref(false);
 const threadRef = ref<HTMLElement | null>(null);
 const replyRef = ref<HTMLTextAreaElement | null>(null);
-
 let workspaceId: string | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let visibilityHandler: (() => void) | null = null;
@@ -375,6 +405,7 @@ function setFilter(val: string) {
 }
 
 async function select(conv: Conv) {
+  confirmingDelete.value = false;
   selectedId.value = conv.id;
   selected.value = conv;
   messagesLoading.value = true;
@@ -387,52 +418,60 @@ async function select(conv: Conv) {
 async function takeover() {
   if (!selected.value) return;
   actionLoading.value = true;
-  const res = await fetch(`${API_BASE}/api-inbox-takeover`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ conversation_id: selected.value.id }),
-  });
-  if (res.ok) {
-    await fetchConversations();
-    const updated = conversations.value.find((c) => c.id === selectedId.value);
-    if (updated) selected.value = updated;
+  try {
+    const res = await fetch(`${API_BASE}/api-inbox-takeover`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: selected.value.id }),
+    });
+    if (res.ok) {
+      await fetchConversations();
+      const updated = conversations.value.find((c) => c.id === selectedId.value);
+      if (updated) selected.value = updated;
+    }
+  } finally {
+    actionLoading.value = false;
   }
-  actionLoading.value = false;
 }
 
 async function release() {
   if (!selected.value) return;
   actionLoading.value = true;
-  const res = await fetch(`${API_BASE}/api-inbox-release`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ conversation_id: selected.value.id }),
-  });
-  if (res.ok) {
-    await fetchConversations();
-    const updated = conversations.value.find((c) => c.id === selectedId.value);
-    if (updated) selected.value = updated;
+  try {
+    const res = await fetch(`${API_BASE}/api-inbox-release`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: selected.value.id }),
+    });
+    if (res.ok) {
+      await fetchConversations();
+      const updated = conversations.value.find((c) => c.id === selectedId.value);
+      if (updated) selected.value = updated;
+    }
+  } finally {
+    actionLoading.value = false;
   }
-  actionLoading.value = false;
 }
 
-async function confirmDelete() {
+async function executeDelete() {
   if (!selected.value) return;
-  const name = leadName(selected.value);
-  if (!window.confirm(`Delete conversation with ${name}? This cannot be undone.`)) return;
   actionLoading.value = true;
-  const res = await fetch(`${API_BASE}/api-inbox-delete`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ conversation_id: selected.value.id }),
-  });
-  if (res.ok) {
-    selectedId.value = null;
-    selected.value = null;
-    messages.value = [];
-    await fetchConversations();
+  try {
+    const res = await fetch(`${API_BASE}/api-inbox-delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: selected.value.id }),
+    });
+    if (res.ok) {
+      selectedId.value = null;
+      selected.value = null;
+      messages.value = [];
+      confirmingDelete.value = false;
+      await fetchConversations();
+    }
+  } finally {
+    actionLoading.value = false;
   }
-  actionLoading.value = false;
 }
 
 async function send() {

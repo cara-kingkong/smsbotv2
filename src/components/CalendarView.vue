@@ -162,21 +162,23 @@
         <div v-if="eventTypesError" class="mt-4 feedback-error">{{ eventTypesError }}</div>
 
         <div v-if="eventTypes.length > 0" class="mt-5 space-y-3">
+          <div class="text-xs text-slate-500 mb-1">
+            Showing {{ (eventTypesPage - 1) * eventTypesPerPage + 1 }}–{{ Math.min(eventTypesPage * eventTypesPerPage, eventTypes.length) }} of {{ eventTypes.length }} event types
+          </div>
+
           <div
-            v-for="et in eventTypes"
+            v-for="et in paginatedEventTypes"
             :key="et.uri"
             class="flex flex-col gap-3 rounded-[16px] border px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
             style="border-color: rgba(17,17,17,0.06); background: rgba(251,251,249,0.94);"
           >
-            <div>
+            <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
                 <span class="text-sm font-semibold text-slate-900">{{ et.name }}</span>
                 <span v-if="!et.active" class="badge bg-slate-100 text-slate-600">inactive</span>
               </div>
-              <div class="mt-1 flex flex-wrap gap-3 text-xs text-slate-500">
-                <span>{{ et.duration }} min</span>
-                <span class="truncate max-w-[240px]">{{ et.scheduling_url }}</span>
-              </div>
+              <div class="mt-1 text-xs text-slate-500">{{ et.duration }} min</div>
+              <div class="mt-1 text-xs text-slate-500 break-all">{{ et.scheduling_url }}</div>
             </div>
             <button
               v-if="!isAlreadyImported(et.uri)"
@@ -188,10 +190,31 @@
             </button>
             <span v-else class="badge bg-emerald-50 text-emerald-700 shrink-0">Imported</span>
           </div>
+
+          <!-- Pagination controls -->
+          <div v-if="eventTypesTotalPages > 1" class="flex items-center justify-between pt-2">
+            <button
+              class="button-secondary px-3 py-2 text-xs"
+              :disabled="eventTypesPage <= 1"
+              @click="eventTypesPage--"
+            >
+              Previous
+            </button>
+            <span class="text-xs text-slate-500">
+              Page {{ eventTypesPage }} of {{ eventTypesTotalPages }}
+            </span>
+            <button
+              class="button-secondary px-3 py-2 text-xs"
+              :disabled="eventTypesPage >= eventTypesTotalPages"
+              @click="eventTypesPage++"
+            >
+              Next
+            </button>
+          </div>
         </div>
 
         <div v-else-if="eventTypesFetched && eventTypes.length === 0" class="mt-4 note-box">
-          No active event types found in your Calendly account.
+          No event types found. Try adjusting your search or enabling inactive types.
         </div>
       </section>
 
@@ -223,19 +246,20 @@
             <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div class="flex items-center gap-2">
-                  <span class="text-sm font-semibold text-slate-900">{{ cal.name }}</span>
+                  <span class="text-sm font-semibold text-slate-900">{{ calendarLabel(cal) }}</span>
                   <span class="badge" :class="cal.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'">
                     {{ cal.status }}
                   </span>
                 </div>
-                <div v-if="cal.booking_url" class="mt-1 text-xs text-slate-500 truncate max-w-sm">{{ cal.booking_url }}</div>
+                <div v-if="calendarLabel(cal) !== cal.name" class="mt-1 text-xs text-slate-500">{{ cal.name }}</div>
+                <div v-if="cal.booking_url" class="mt-1 text-xs text-slate-500 break-all">{{ cal.booking_url }}</div>
               </div>
               <div class="flex items-center gap-2">
                 <button
                   class="button-secondary px-3 py-2 text-xs"
                   @click="toggleRulesEditor(cal.id)"
                 >
-                  {{ expandedCalendarId === cal.id ? 'Close Rules' : 'Edit Rules' }}
+                  {{ expandedCalendarId === cal.id ? 'Close' : 'Edit' }}
                 </button>
                 <button
                   v-if="cal.status === 'active'"
@@ -260,70 +284,28 @@
               </div>
             </div>
 
-            <!-- Eligibility Rules Editor -->
+            <!-- Calendar Settings & Eligibility Rules Editor -->
             <div v-if="expandedCalendarId === cal.id" class="mt-4 space-y-4 border-t pt-4" style="border-color: rgba(17,17,17,0.06);">
               <div>
-                <label class="form-label">Required Tags</label>
-                <p class="form-help mb-2">Lead must have all these tags to be eligible for booking.</p>
-                <div class="flex flex-wrap gap-2 mb-2">
-                  <span
-                    v-for="(tag, idx) in rulesForm.required_tags"
-                    :key="`tag-${idx}`"
-                    class="inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium text-slate-700"
-                    style="border-color: rgba(17,17,17,0.08); background: rgba(255,255,255,0.92);"
-                  >
-                    {{ tag }}
-                    <button type="button" class="ml-1 text-slate-400 hover:text-red-500" @click="rulesForm.required_tags.splice(idx, 1)">&times;</button>
-                  </span>
-                </div>
-                <div class="flex gap-2">
-                  <input v-model="newTag" type="text" placeholder="e.g. qualified" class="input flex-1" @keydown.enter.prevent="addTag" />
-                  <button type="button" class="button-secondary" @click="addTag">Add</button>
-                </div>
+                <label class="form-label">Label</label>
+                <p class="form-help mb-2">A friendly display name for this calendar in your dashboard.</p>
+                <input
+                  v-model="rulesForm.label"
+                  type="text"
+                  :placeholder="cal.name"
+                  class="input"
+                />
               </div>
 
               <div>
-                <label class="form-label">Required Fields</label>
-                <p class="form-help mb-2">Lead data must include these fields before booking is allowed.</p>
-                <div class="flex flex-wrap gap-2 mb-2">
-                  <span
-                    v-for="(field, idx) in rulesForm.required_fields"
-                    :key="`field-${idx}`"
-                    class="inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium text-slate-700"
-                    style="border-color: rgba(17,17,17,0.08); background: rgba(255,255,255,0.92);"
-                  >
-                    {{ field }}
-                    <button type="button" class="ml-1 text-slate-400 hover:text-red-500" @click="rulesForm.required_fields.splice(idx, 1)">&times;</button>
-                  </span>
-                </div>
-                <div class="flex gap-2">
-                  <input v-model="newField" type="text" placeholder="e.g. budget" class="input flex-1" @keydown.enter.prevent="addField" />
-                  <button type="button" class="button-secondary" @click="addField">Add</button>
-                </div>
-              </div>
-
-              <div>
-                <label class="form-label">Eligibility Rules</label>
-                <p class="form-help mb-2">Conditions the lead must meet. All rules must pass.</p>
-                <div class="space-y-2">
-                  <div
-                    v-for="(rule, idx) in rulesForm.rules"
-                    :key="`rule-${idx}`"
-                    class="flex flex-wrap items-center gap-2"
-                  >
-                    <input v-model="rule.field" type="text" placeholder="field" class="input w-32" />
-                    <select v-model="rule.operator" class="select w-24">
-                      <option value=">=">&gt;=</option>
-                      <option value="<=">&lt;=</option>
-                      <option value="==">=&#61;</option>
-                      <option value="!=">!=</option>
-                      <option value="contains">contains</option>
-                    </select>
-                    <input v-model="rule.value" type="text" placeholder="value" class="input w-32" />
-                    <button type="button" class="text-slate-400 hover:text-red-500 text-sm" @click="rulesForm.rules.splice(idx, 1)">&times;</button>
-                  </div>
-                </div>
-                <button type="button" class="button-secondary mt-2 text-xs" @click="addRule">+ Add Rule</button>
+                <label class="form-label">Booking Criteria</label>
+                <p class="form-help mb-2">Describe when the AI should book a lead into this calendar. The agent will use this to choose the right calendar.</p>
+                <textarea
+                  v-model="rulesForm.booking_criteria"
+                  rows="4"
+                  placeholder="e.g. Book into this calendar when the lead has a budget over $3,000 and is interested in consulting services."
+                  class="input resize-y"
+                ></textarea>
               </div>
 
               <div v-if="rulesSaveSuccess" class="feedback-success">{{ rulesSaveSuccess }}</div>
@@ -334,19 +316,22 @@
                 class="button-primary"
                 @click="saveRules(cal.id)"
               >
-                {{ rulesSaving ? 'Saving...' : 'Save Rules' }}
+                {{ rulesSaving ? 'Saving...' : 'Save' }}
               </button>
             </div>
           </div>
         </div>
       </section>
+
+      <CalendarEventsPanel />
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { getSessionContext } from '@lib/config/public-client';
+import CalendarEventsPanel from './CalendarEventsPanel.vue';
 
 const API_BASE = '/api';
 
@@ -382,6 +367,14 @@ const eventTypesFetched = ref(false);
 const importingUri = ref('');
 const searchQuery = ref('');
 const includeInactive = ref(false);
+const eventTypesPage = ref(1);
+const eventTypesPerPage = 5;
+
+const eventTypesTotalPages = computed(() => Math.max(1, Math.ceil(eventTypes.value.length / eventTypesPerPage)));
+const paginatedEventTypes = computed(() => {
+  const start = (eventTypesPage.value - 1) * eventTypesPerPage;
+  return eventTypes.value.slice(start, start + eventTypesPerPage);
+});
 
 // Calendar targets
 interface CalendarTarget {
@@ -390,8 +383,14 @@ interface CalendarTarget {
   external_calendar_id: string | null;
   booking_url: string | null;
   eligibility_rules_json: Record<string, unknown>;
+  settings_json: Record<string, unknown>;
   status: string;
   created_at: string;
+}
+
+function calendarLabel(cal: CalendarTarget): string {
+  const label = cal.settings_json?.label;
+  return typeof label === 'string' && label ? label : cal.name;
 }
 
 const calendars = ref<CalendarTarget[]>([]);
@@ -400,16 +399,12 @@ const calendarsLoading = ref(false);
 // Rules editor
 const expandedCalendarId = ref<string | null>(null);
 const rulesForm = ref<{
-  required_tags: string[];
-  required_fields: string[];
-  rules: Array<{ field: string; operator: string; value: string }>;
+  label: string;
+  booking_criteria: string;
 }>({
-  required_tags: [],
-  required_fields: [],
-  rules: [],
+  label: '',
+  booking_criteria: '',
 });
-const newTag = ref('');
-const newField = ref('');
 const rulesSaving = ref(false);
 const rulesSaveSuccess = ref('');
 const rulesSaveError = ref('');
@@ -430,44 +425,12 @@ function toggleRulesEditor(calendarId: string) {
 
   const cal = calendars.value.find((c) => c.id === calendarId);
   const rules = (cal?.eligibility_rules_json ?? {}) as Record<string, unknown>;
-
-  const rawTags = rules.required_tags;
-  const rawFields = rules.required_fields;
-  const rawRules = rules.rules;
+  const settings = (cal?.settings_json ?? {}) as Record<string, unknown>;
 
   rulesForm.value = {
-    required_tags: Array.isArray(rawTags) ? rawTags.filter((t): t is string => typeof t === 'string') : [],
-    required_fields: Array.isArray(rawFields) ? rawFields.filter((f): f is string => typeof f === 'string') : [],
-    rules: Array.isArray(rawRules)
-      ? rawRules.map((r: Record<string, unknown>) => ({
-          field: String(r.field ?? ''),
-          operator: String(r.operator ?? '>='),
-          value: String(r.value ?? ''),
-        }))
-      : [],
+    label: typeof settings.label === 'string' ? settings.label : '',
+    booking_criteria: typeof rules.booking_criteria === 'string' ? rules.booking_criteria : '',
   };
-  newTag.value = '';
-  newField.value = '';
-}
-
-function addTag() {
-  const v = newTag.value.trim();
-  if (v && !rulesForm.value.required_tags.includes(v)) {
-    rulesForm.value.required_tags.push(v);
-  }
-  newTag.value = '';
-}
-
-function addField() {
-  const v = newField.value.trim();
-  if (v && !rulesForm.value.required_fields.includes(v)) {
-    rulesForm.value.required_fields.push(v);
-  }
-  newField.value = '';
-}
-
-function addRule() {
-  rulesForm.value.rules.push({ field: '', operator: '>=', value: '' });
 }
 
 async function fetchCalendly() {
@@ -563,6 +526,7 @@ async function fetchEventTypes() {
 
     eventTypes.value = data;
     eventTypesFetched.value = true;
+    eventTypesPage.value = 1;
   } catch {
     eventTypesError.value = 'Network error. Please try again.';
   } finally {
@@ -601,18 +565,15 @@ async function saveRules(calendarId: string) {
   rulesSaveSuccess.value = '';
   rulesSaveError.value = '';
 
-  const payload: Record<string, unknown> = {};
-  if (rulesForm.value.required_tags.length > 0) payload.required_tags = rulesForm.value.required_tags;
-  if (rulesForm.value.required_fields.length > 0) payload.required_fields = rulesForm.value.required_fields;
-  if (rulesForm.value.rules.length > 0) {
-    payload.rules = rulesForm.value.rules
-      .filter((r) => r.field.trim())
-      .map((r) => ({
-        field: r.field,
-        operator: r.operator,
-        value: isNaN(Number(r.value)) ? r.value : Number(r.value),
-      }));
+  const rulesPayload: Record<string, unknown> = {
+    required_tags: ['qualified'],
+  };
+  if (rulesForm.value.booking_criteria.trim()) {
+    rulesPayload.booking_criteria = rulesForm.value.booking_criteria.trim();
   }
+
+  const settingsPayload: Record<string, unknown> = {};
+  if (rulesForm.value.label.trim()) settingsPayload.label = rulesForm.value.label.trim();
 
   try {
     const res = await fetch(`${API_BASE}/api-calendars-update`, {
@@ -621,17 +582,18 @@ async function saveRules(calendarId: string) {
       body: JSON.stringify({
         calendar_id: calendarId,
         workspace_id: workspaceId,
-        eligibility_rules_json: payload,
+        eligibility_rules_json: rulesPayload,
+        ...(Object.keys(settingsPayload).length > 0 ? { settings_json: settingsPayload } : {}),
       }),
     });
 
     const data = await res.json();
     if (!res.ok) {
-      rulesSaveError.value = data.error || 'Failed to save rules';
+      rulesSaveError.value = data.error || 'Failed to save';
       return;
     }
 
-    rulesSaveSuccess.value = 'Eligibility rules saved';
+    rulesSaveSuccess.value = 'Calendar settings saved';
     await fetchCalendars();
   } catch {
     rulesSaveError.value = 'Network error. Please try again.';

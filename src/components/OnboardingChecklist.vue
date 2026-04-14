@@ -101,7 +101,9 @@ function dismiss() {
   dismissed.value = true;
   try {
     localStorage.setItem('kong_onboarding_dismissed', 'true');
-  } catch {}
+  } catch {
+    // Ignore browsers where localStorage is unavailable.
+  }
 }
 
 onMounted(() => {
@@ -115,7 +117,9 @@ onMounted(() => {
     if (localStorage.getItem('kong_onboarding_dismissed') === 'true') {
       dismissed.value = true;
     }
-  } catch {}
+  } catch {
+    // Ignore browsers where localStorage is unavailable.
+  }
 
   // Show celebration if just activated
   if (state.value.isActivated) {

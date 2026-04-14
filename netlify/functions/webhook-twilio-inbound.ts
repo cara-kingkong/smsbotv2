@@ -116,10 +116,11 @@ export default async (req: Request, _context: Context) => {
     const conversationService = new ConversationService(db);
 
     // Find active conversation for this lead
-    const { data: conversation } = await db
+    const { data: activeConversation } = await db
       .from('conversations')
       .select('id, status, human_controlled, agent_version_id')
       .eq('lead_id', lead.id)
+      .is('deleted_at', null)
       .in('status', [
         ConversationStatus.Active,
         ConversationStatus.WaitingForLead,
@@ -132,8 +133,42 @@ export default async (req: Request, _context: Context) => {
       .limit(1)
       .single();
 
+    let conversation = activeConversation;
+    console.log(`[Inbound] Lead ${lead.id} — active conversation: ${activeConversation?.id ?? 'none'}`);
+
+    // If no active conversation, re-open the most recent one (except opted-out)
     if (!conversation) {
-      console.warn(`No active conversation for lead: ${lead.id}`);
+      // Debug: check what conversations exist for this lead
+      const { data: allConversations } = await db
+        .from('conversations')
+        .select('id, status, outcome, deleted_at')
+        .eq('lead_id', lead.id)
+        .order('last_activity_at', { ascending: false })
+        .limit(5);
+
+      console.log(`[Inbound] All conversations for lead ${lead.id}:`, allConversations);
+
+      const { data: previousConversation } = await db
+        .from('conversations')
+        .select('id, status, human_controlled, agent_version_id')
+        .eq('lead_id', lead.id)
+        .neq('status', ConversationStatus.OptedOut)
+        .is('deleted_at', null)
+        .order('last_activity_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      console.log(`[Inbound] Re-open candidate:`, previousConversation);
+
+      if (previousConversation) {
+        console.log(`[Inbound] Re-opening conversation ${previousConversation.id} (was ${previousConversation.status}) for lead ${lead.id}`);
+        await conversationService.updateStatus(previousConversation.id, ConversationStatus.Active);
+        conversation = { ...previousConversation, status: ConversationStatus.Active, human_controlled: false };
+      }
+    }
+
+    if (!conversation) {
+      console.warn(`[Inbound] No conversation found for lead: ${lead.id}`);
       if (receiptId) {
         await db.from('webhook_receipts').update({ processed_status: 'completed' }).eq('id', receiptId);
       }
@@ -143,8 +178,9 @@ export default async (req: Request, _context: Context) => {
       });
     }
 
-    // Check for opt-out keywords
-    const optOutKeywords = ['stop', 'unsubscribe', 'cancel', 'quit', 'end'];
+    // Check for opt-out keywords (TCPA compliance: STOP is required, others optional)
+    // "cancel" is excluded — leads use it to cancel bookings, not to opt out
+    const optOutKeywords = ['stop', 'unsubscribe', 'quit', 'end'];
     if (optOutKeywords.includes(inbound.body.trim().toLowerCase())) {
       await conversationService.setOutcome(conversation.id, ConversationOutcome.OptedOut);
       await conversationService.updateStatus(conversation.id, ConversationStatus.OptedOut);
@@ -210,12 +246,16 @@ export default async (req: Request, _context: Context) => {
       conversation.human_controlled ? ConversationStatus.HumanControlled : ConversationStatus.Active,
     );
 
-    // If not human-controlled, queue AI evaluation with realistic reply delay
+    // If not human-controlled, queue AI evaluation with message coalescing.
+    // When a lead sends rapid-fire messages ("Hey" → "Are you there?" → "I need help"),
+    // each new message cancels the pending AI reply job and resets the timer.
+    // The AI only generates a single reply once the lead stops typing.
     if (!conversation.human_controlled) {
       const queueService = new QueueService(db);
 
-      // Look up the agent version's initial_delay_seconds for a realistic typing delay
-      let runAt: Date | undefined;
+      // Look up the agent version's cadence settings
+      let coalesceSec = 8; // default coalesce window
+      let initialDelaySec = 0;
       if (conversation.agent_version_id) {
         const { data: agentVersion } = await db
           .from('agent_versions')
@@ -223,11 +263,26 @@ export default async (req: Request, _context: Context) => {
           .eq('id', conversation.agent_version_id)
           .single();
 
-        const delaySec = agentVersion?.reply_cadence_json?.initial_delay_seconds;
-        if (delaySec && delaySec > 0) {
-          runAt = new Date(Date.now() + delaySec * 1000);
+        const cadence = agentVersion?.reply_cadence_json;
+        if (cadence?.coalesce_window_seconds !== undefined && cadence.coalesce_window_seconds >= 0) {
+          coalesceSec = cadence.coalesce_window_seconds;
+        }
+        if (cadence?.initial_delay_seconds && cadence.initial_delay_seconds > 0) {
+          initialDelaySec = cadence.initial_delay_seconds;
         }
       }
+
+      // Cancel any pending AI reply job for this conversation (debounce reset)
+      const cancelled = await queueService.cancelPendingAIReplies(conversation.id);
+      if (cancelled > 0) {
+        console.log(`Coalesced: cancelled ${cancelled} pending AI reply job(s) for ${conversation.id}`);
+      }
+
+      // Schedule a fresh AI reply job. The total delay from this message is
+      // coalesce_window + initial_delay so the AI waits for more messages AND
+      // then adds a realistic typing pause before responding.
+      const totalDelaySec = coalesceSec + initialDelaySec;
+      const runAt = totalDelaySec > 0 ? new Date(Date.now() + totalDelaySec * 1000) : undefined;
 
       await queueService.enqueue({
         workspace_id: lead.workspace_id,
