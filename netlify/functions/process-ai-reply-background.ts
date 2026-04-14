@@ -387,7 +387,12 @@ export default async (req: Request, _context: Context) =>
       }
     }
 
-    if (decision.should_reply && decision.reply_text) {
+    // Skip the AI reply when a booking is about to be queued — the booking
+    // background function sends a proper confirmation with time and email.
+    const bookingWillQueue = decision.should_book
+      && (decision.recommended_calendar_id || calendars.length > 0);
+
+    if (decision.should_reply && decision.reply_text && !bookingWillQueue) {
       tookAction = true;
       await heartbeat();
       const message = await messagingService.sendOutbound({
