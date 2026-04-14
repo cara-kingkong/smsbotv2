@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Conversation } from '@lib/types';
 import { ConversationStatus, ConversationOutcome, ConversationEventType } from '@lib/types';
+import { AuditService } from '@lib/audit/service';
 
 export interface CreateConversationInput {
   workspace_id: string;
@@ -96,6 +97,10 @@ export class ConversationService {
       .single();
 
     if (error) throw new Error(`Failed to update status: ${error.message}`);
+
+    this.audit(data.workspace_id, 'conversation', id, `status_${status}`, { status })
+      .catch((err) => console.warn('Audit log failed:', err));
+
     return data;
   }
 
@@ -108,6 +113,10 @@ export class ConversationService {
       .single();
 
     if (error) throw new Error(`Failed to set outcome: ${error.message}`);
+
+    this.audit(data.workspace_id, 'conversation', id, `outcome_${outcome}`, { outcome })
+      .catch((err) => console.warn('Audit log failed:', err));
+
     return data;
   }
 
@@ -138,6 +147,14 @@ export class ConversationService {
     const { data, error } = await query;
     if (error) throw new Error(`Failed to list conversations: ${error.message}`);
     return data ?? [];
+  }
+
+  private async audit(
+    workspaceId: string, entityType: string, entityId: string,
+    actionType: string, metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    const svc = new AuditService(this.db);
+    await svc.log({ workspace_id: workspaceId, entity_type: entityType, entity_id: entityId, action_type: actionType, metadata });
   }
 
   private async logEvent(conversationId: string, eventType: ConversationEventType, payload: Record<string, unknown>): Promise<void> {

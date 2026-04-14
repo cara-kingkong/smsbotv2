@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CRMAdapter, CRMEvent } from '@lib/types';
 import { CRMEventType, CRMSyncStatus } from '@lib/types';
+import { AuditService } from '@lib/audit/service';
 
 export interface EmitCRMEventInput {
   workspace_id: string;
@@ -74,16 +75,35 @@ export class CRMService {
           response_payload_json: result.raw_response,
         })
         .eq('id', eventId);
+
+      new AuditService(this.db).log({
+        workspace_id: event.workspace_id,
+        entity_type: 'integration',
+        entity_id: eventId,
+        action_type: 'crm_sync_success',
+        metadata: { provider: providerKey, event_type: event.event_type },
+      }).catch((err2) => console.warn('Audit log failed:', err2));
     } catch (err) {
       const retryCount = (event.retry_count ?? 0) + 1;
+      const finalStatus = retryCount >= 3 ? CRMSyncStatus.Failed : CRMSyncStatus.Retrying;
       await this.db
         .from('crm_events')
         .update({
-          status: retryCount >= 3 ? CRMSyncStatus.Failed : CRMSyncStatus.Retrying,
+          status: finalStatus,
           retry_count: retryCount,
           response_payload_json: { error: err instanceof Error ? err.message : 'Unknown' },
         })
         .eq('id', eventId);
+
+      if (finalStatus === CRMSyncStatus.Failed) {
+        new AuditService(this.db).log({
+          workspace_id: event.workspace_id,
+          entity_type: 'integration',
+          entity_id: eventId,
+          action_type: 'crm_sync_failed',
+          metadata: { provider: providerKey, event_type: event.event_type, retry_count: retryCount },
+        }).catch((err2) => console.warn('Audit log failed:', err2));
+      }
     }
   }
 }

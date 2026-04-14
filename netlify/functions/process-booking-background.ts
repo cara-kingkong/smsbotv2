@@ -13,6 +13,7 @@ import {
   SenderType,
 } from '../../src/lib/types';
 import { CRMService } from '../../src/lib/crm/service';
+import { AuditService } from '../../src/lib/audit/service';
 import { runQueueJob } from '../../src/lib/queues/job-runner';
 
 interface ProcessBookingPayload {
@@ -260,6 +261,18 @@ export default async (req: Request, _context: Context) =>
 
     await conversationService.setOutcome(conversation_id, ConversationOutcome.Booked);
     await conversationService.updateStatus(conversation_id, ConversationStatus.Completed);
+
+    new AuditService(db).log({
+      workspace_id: conversation.workspace_id,
+      entity_type: 'integration',
+      entity_id: conversation_id,
+      action_type: 'booking_completed',
+      metadata: {
+        booking_id: bookingResult.booking_id,
+        calendar_name: validation.calendar.name,
+        calendar_id: validation.calendar.id,
+      },
+    }).catch((err) => console.warn('Audit log failed:', err));
 
     const { data: crmIntegration } = await db
       .from('integrations')

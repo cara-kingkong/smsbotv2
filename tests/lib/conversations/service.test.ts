@@ -150,7 +150,7 @@ describe('ConversationService', () => {
         status: ConversationStatus.HumanControlled,
       });
 
-      const insertedEvents: unknown[] = [];
+      const insertedEvents: { table: string; data: unknown }[] = [];
       const db = {
         from: vi.fn().mockImplementation((table: string) => {
           if (table === 'conversations') {
@@ -164,11 +164,14 @@ describe('ConversationService', () => {
               }),
             };
           }
-          // conversation_events
           return {
             insert: vi.fn().mockImplementation((data: unknown) => {
-              insertedEvents.push(data);
-              return Promise.resolve({ data: null, error: null });
+              insertedEvents.push({ table, data });
+              return {
+                select: vi.fn().mockReturnValue({
+                  single: vi.fn().mockResolvedValue({ data: null, error: null }),
+                }),
+              };
             }),
           };
         }),
@@ -179,8 +182,9 @@ describe('ConversationService', () => {
 
       expect(result.human_controlled).toBe(true);
       expect(result.status).toBe(ConversationStatus.HumanControlled);
-      expect(insertedEvents.length).toBe(1);
-      expect((insertedEvents[0] as Record<string, unknown>).event_type).toBe(
+      const eventInserts = insertedEvents.filter((e) => e.table === 'conversation_events');
+      expect(eventInserts.length).toBe(1);
+      expect((eventInserts[0].data as Record<string, unknown>).event_type).toBe(
         ConversationEventType.HumanTakeover,
       );
     });
@@ -193,7 +197,7 @@ describe('ConversationService', () => {
         status: ConversationStatus.Active,
       });
 
-      const insertedEvents: unknown[] = [];
+      const insertedEvents: { table: string; data: unknown }[] = [];
       const db = {
         from: vi.fn().mockImplementation((table: string) => {
           if (table === 'conversations') {
@@ -209,8 +213,12 @@ describe('ConversationService', () => {
           }
           return {
             insert: vi.fn().mockImplementation((data: unknown) => {
-              insertedEvents.push(data);
-              return Promise.resolve({ data: null, error: null });
+              insertedEvents.push({ table, data });
+              return {
+                select: vi.fn().mockReturnValue({
+                  single: vi.fn().mockResolvedValue({ data: null, error: null }),
+                }),
+              };
             }),
           };
         }),
@@ -221,8 +229,9 @@ describe('ConversationService', () => {
 
       expect(result.human_controlled).toBe(false);
       expect(result.status).toBe(ConversationStatus.Active);
-      expect(insertedEvents.length).toBe(1);
-      expect((insertedEvents[0] as Record<string, unknown>).event_type).toBe(
+      const eventInserts = insertedEvents.filter((e) => e.table === 'conversation_events');
+      expect(eventInserts.length).toBe(1);
+      expect((eventInserts[0].data as Record<string, unknown>).event_type).toBe(
         ConversationEventType.HumanRelease,
       );
     });
