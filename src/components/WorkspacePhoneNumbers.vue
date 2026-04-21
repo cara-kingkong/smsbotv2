@@ -8,7 +8,7 @@
           <div>
             <h3 class="form-label">Phone Numbers</h3>
             <p class="section-copy">
-              Outbound SMS picks a number whose country matches the lead. Falls back to the default when no country matches.
+              Outbound SMS only goes to leads whose country matches one of your numbers. If no number for that country is configured, the conversation is flagged for a human instead of sending.
             </p>
           </div>
           <button type="button" class="button-primary" :disabled="showForm" @click="openNewForm">

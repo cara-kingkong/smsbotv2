@@ -115,22 +115,21 @@ export class PhoneNumberService {
   }
 
   /**
-   * Pick the best outbound number for a given lead. Matches the lead's
-   * country first; falls back to the workspace default.
-   * Returns null when the workspace has no numbers configured — callers
-   * decide whether to escalate or use a legacy env-var fallback.
+   * Pick the outbound number for a given lead. MUST match the lead's
+   * country — we never send into a country the workspace hasn't configured.
+   * When multiple numbers in that country exist, the workspace default is
+   * preferred. Returns null when the lead's country can't be determined
+   * or the workspace has no number in that country.
    */
   async resolveForLead(workspaceId: string, leadE164: string): Promise<WorkspacePhoneNumber | null> {
-    const numbers = await this.list(workspaceId);
-    if (numbers.length === 0) return null;
-
     const country = parsePhoneNumberFromString(leadE164)?.country;
-    if (country) {
-      const match = numbers.find((n) => n.country_code === country);
-      if (match) return match;
-    }
+    if (!country) return null;
 
-    return numbers.find((n) => n.is_default) ?? numbers[0];
+    const numbers = await this.list(workspaceId);
+    const countryMatches = numbers.filter((n) => n.country_code === country);
+    if (countryMatches.length === 0) return null;
+
+    return countryMatches.find((n) => n.is_default) ?? countryMatches[0];
   }
 
   /**

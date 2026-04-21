@@ -26,6 +26,7 @@ import { isWithinBusinessHours, getNextBusinessHoursStart } from '../../src/lib/
 import { evaluateStopConditions } from '../../src/lib/utils/stop-conditions';
 import { detectBookingAcceptance } from '../../src/lib/utils/booking-guard';
 import { runQueueJob } from '../../src/lib/queues/job-runner';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
 
 interface ProcessAIReplyPayload {
   conversation_id: string;
@@ -103,21 +104,28 @@ export default async (req: Request, _context: Context) =>
     const workspaceService = new WorkspaceService(db);
     const workspace = await workspaceService.getById(campaign.workspace_id);
 
-    // Resolve the outbound "from" number for this lead. Country-aware; falls
-    // back to the workspace default, then to the legacy env var so existing
-    // deployments keep sending while they migrate.
+    // Resolve the outbound "from" number for this lead. MUST match the
+    // lead's country — we never send into a country the workspace hasn't
+    // configured. No cross-country fallback, no env-var backdoor.
     const resolvedNumber = await phoneNumbers.resolveForLead(conversation.workspace_id, lead.phone_e164);
-    const fromNumber = resolvedNumber?.e164 ?? process.env.TWILIO_PHONE_NUMBER ?? null;
-    if (!fromNumber) {
-      console.error(`No outbound number available for workspace ${conversation.workspace_id}`);
+    if (!resolvedNumber) {
+      const leadCountry = parsePhoneNumberFromString(lead.phone_e164)?.country ?? null;
+      console.warn(
+        `Send blocked for conversation ${conversation_id}: no workspace number in country ${leadCountry ?? 'unknown'}`,
+      );
       await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
       await db.from('conversation_events').insert({
         conversation_id,
-        event_type: 'send_blocked_no_number',
-        event_payload_json: { workspace_id: conversation.workspace_id, lead_phone: lead.phone_e164 },
+        event_type: 'send_blocked_no_number_for_country',
+        event_payload_json: {
+          workspace_id: conversation.workspace_id,
+          lead_phone: lead.phone_e164,
+          lead_country: leadCountry,
+        },
       });
-      return new Response('No outbound number configured', { status: 200 });
+      return new Response('No outbound number for lead country', { status: 200 });
     }
+    const fromNumber = resolvedNumber.e164;
 
     const hasCampaignStopConditions = campaign.stop_conditions_json?.max_messages !== undefined
       && Object.keys(campaign.stop_conditions_json).length > 0;

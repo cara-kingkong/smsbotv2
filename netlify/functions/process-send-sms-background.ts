@@ -1,4 +1,5 @@
 import type { Context } from '@netlify/functions';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { ConversationService } from '../../src/lib/conversations/service';
 import { MessagingService } from '../../src/lib/messaging/service';
 import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
@@ -6,7 +7,7 @@ import { PhoneNumberService } from '../../src/lib/messaging/phone-numbers';
 import { checkSendAllowed } from '../../src/lib/messaging/send-guard';
 import { LeadService } from '../../src/lib/leads/service';
 import { runQueueJob } from '../../src/lib/queues/job-runner';
-import { SenderType } from '../../src/lib/types';
+import { ConversationStatus, SenderType } from '../../src/lib/types';
 
 interface ProcessSendSmsPayload {
   message_id: string;
@@ -66,7 +67,9 @@ export default async (req: Request, _context: Context) =>
       return new Response('Deferred — outside business hours', { status: 200 });
     }
 
-    // Resolve outbound `from` if the caller didn't pin one.
+    // Resolve outbound `from`. The country MUST match the lead's — we never
+    // send into a country the workspace hasn't configured. A caller-pinned
+    // `from` is accepted as-is (AI reply path already resolves it upstream).
     let fromNumber = payload.from;
     if (!fromNumber) {
       const phoneNumbers = new PhoneNumberService(context.db);
@@ -74,13 +77,41 @@ export default async (req: Request, _context: Context) =>
       const lead = await leadService.getById(conversation.lead_id);
       if (lead) {
         const resolved = await phoneNumbers.resolveForLead(conversation.workspace_id, lead.phone_e164);
-        if (resolved) fromNumber = resolved.e164;
+        if (resolved) {
+          fromNumber = resolved.e164;
+        } else {
+          const leadCountry = parsePhoneNumberFromString(lead.phone_e164)?.country ?? null;
+          console.warn(
+            `Send blocked for conversation ${payload.conversation_id}: no workspace number in country ${leadCountry ?? 'unknown'}`,
+          );
+          await context.db.from('conversation_events').insert({
+            conversation_id: payload.conversation_id,
+            event_type: 'send_blocked_no_number_for_country',
+            event_payload_json: {
+              workspace_id: conversation.workspace_id,
+              lead_phone: lead.phone_e164,
+              lead_country: leadCountry,
+              message_id: payload.message_id,
+            },
+          });
+          await context.db
+            .from('messages')
+            .update({
+              provider_status: 'blocked_no_number_for_country',
+              error_json: { reason: 'no_workspace_number_for_country', lead_country: leadCountry },
+            })
+            .eq('id', payload.message_id);
+          await new ConversationService(context.db).updateStatus(
+            payload.conversation_id,
+            ConversationStatus.NeedsHuman,
+          );
+          return new Response('Blocked — no workspace number for lead country', { status: 200 });
+        }
       }
-      if (!fromNumber) fromNumber = process.env.TWILIO_PHONE_NUMBER;
     }
 
     if (!fromNumber) {
-      throw new Error(`No outbound phone number configured for workspace ${conversation.workspace_id}`);
+      throw new Error(`No outbound phone number resolvable for conversation ${payload.conversation_id}`);
     }
 
     const twilioAdapter = new TwilioAdapter(
