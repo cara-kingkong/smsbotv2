@@ -46,10 +46,8 @@ export class MessagingService {
 
     if (insertError) throw new Error(`Failed to persist queued message: ${insertError.message}`);
 
-    await this.db
-      .from('conversations')
-      .update({ last_activity_at: new Date().toISOString() })
-      .eq('id', input.conversation_id);
+    // conversations.last_activity_at / last_message_* are maintained by the
+    // trg_update_conversation_last_message trigger on messages.
 
     return message;
   }
@@ -171,11 +169,8 @@ export class MessagingService {
       throw new Error(`Failed to record inbound message: ${error.message}`);
     }
 
-    // Update conversation last_activity_at
-    await this.db
-      .from('conversations')
-      .update({ last_activity_at: new Date().toISOString() })
-      .eq('id', input.conversation_id);
+    // conversations.last_activity_at / last_message_* are maintained by the
+    // trg_update_conversation_last_message trigger on messages.
 
     return data;
   }

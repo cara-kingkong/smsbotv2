@@ -50,6 +50,7 @@ export default async (req: Request, _context: Context) => {
       .from('conversations')
       .select(`
         id, status, human_controlled, needs_human, last_activity_at, outcome,
+        last_message_preview, last_message_sender_type, last_message_at,
         lead:leads(id, first_name, last_name, phone_e164, email)
       `)
       .eq('workspace_id', access.workspace.id)
@@ -64,37 +65,24 @@ export default async (req: Request, _context: Context) => {
     const { data: conversations, error } = await query;
     if (error) throw new Error(`Failed to list inbox conversations: ${error.message}`);
 
-    const conversationIds = (conversations ?? []).map((conversation) => conversation.id);
-    const lastMessageByConversation = new Map<string, unknown>();
+    const payload = (conversations ?? []).map((conversation) => {
+      const {
+        last_message_preview,
+        last_message_sender_type,
+        last_message_at,
+        ...rest
+      } = conversation as Record<string, unknown>;
 
-    if (conversationIds.length > 0) {
-      // Fetch only the most recent message per conversation using limit per group.
-      // Supabase doesn't support DISTINCT ON, so we fetch 1 message per conversation
-      // in parallel batches to avoid pulling all messages into memory.
-      const messagePromises = conversationIds.map((convId) =>
-        db
-          .from('messages')
-          .select('id, conversation_id, body_text, sender_type, direction, created_at')
-          .eq('conversation_id', convId)
-          .order('created_at', { ascending: false })
-          .limit(1)
-      );
+      const last_message = last_message_preview
+        ? [{
+            body_text: last_message_preview,
+            sender_type: last_message_sender_type,
+            created_at: last_message_at,
+          }]
+        : [];
 
-      const messageResults = await Promise.all(messagePromises);
-
-      for (const result of messageResults) {
-        if (result.error) continue;
-        const msg = result.data?.[0];
-        if (msg) {
-          lastMessageByConversation.set(msg.conversation_id, [msg]);
-        }
-      }
-    }
-
-    const payload = (conversations ?? []).map((conversation) => ({
-      ...conversation,
-      last_message: (lastMessageByConversation.get(conversation.id) as unknown[] | undefined) ?? [],
-    }));
+      return { ...rest, last_message };
+    });
 
     return new Response(JSON.stringify(payload), {
       status: 200,
