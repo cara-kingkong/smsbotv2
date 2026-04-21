@@ -45,6 +45,20 @@ export interface WorkspaceUser {
   created_at: string;
 }
 
+// ─── Workspace Phone Numbers ─────────────────────────────────
+
+export interface WorkspacePhoneNumber {
+  id: string;
+  workspace_id: string;
+  e164: string;
+  country_code: string; // ISO-2, e.g. 'AU', 'US'
+  label: string;
+  is_default: boolean;
+  provider: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // ─── Integration ─────────────────────────────────────────────
 
 export interface Integration {

@@ -1,6 +1,7 @@
 ---
 import BaseLayout from '@layouts/BaseLayout.astro';
 import WorkspaceSettings from '@components/WorkspaceSettings.vue';
+import WorkspacePhoneNumbers from '@components/WorkspacePhoneNumbers.vue';
 import IntegrationManager from '@components/IntegrationManager.vue';
 import WorkspaceMembersView from '@components/WorkspaceMembersView.vue';
 ---
@@ -19,6 +20,11 @@ import WorkspaceMembersView from '@components/WorkspaceMembersView.vue';
     <section>
       <h2 class="section-title mb-4">Workspace Defaults</h2>
       <WorkspaceSettings client:load />
+    </section>
+
+    <section>
+      <h2 class="section-title mb-4">Phone Numbers</h2>
+      <WorkspacePhoneNumbers client:load />
     </section>
 
     <section>

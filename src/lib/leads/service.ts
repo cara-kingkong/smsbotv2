@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Lead } from '@lib/types';
 import { EntityStatus } from '@lib/types';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
+import { PhoneNumberService } from '@lib/messaging/phone-numbers';
 
 export interface UpsertLeadInput {
   workspace_id: string;
@@ -13,6 +14,8 @@ export interface UpsertLeadInput {
   external_contact_id?: string;
   crm_provider?: string;
   source_json?: Record<string, unknown>;
+  /** ISO-2 country code to use when `phone` is not already in E.164. Overrides workspace default. */
+  default_country?: string;
 }
 
 export class LeadService {
@@ -20,7 +23,9 @@ export class LeadService {
 
   /** Upsert lead by phone within workspace. Normalize phone to E.164. */
   async upsertByPhone(input: UpsertLeadInput): Promise<Lead> {
-    const phoneE164 = this.normalizePhone(input.phone);
+    const defaultCountry = input.default_country
+      ?? (await this.resolveWorkspaceDefaultCountry(input.workspace_id));
+    const phoneE164 = this.normalizePhone(input.phone, defaultCountry);
 
     // Check existing
     const { data: existing } = await this.db
@@ -84,7 +89,8 @@ export class LeadService {
   }
 
   async findByPhone(workspaceId: string, phone: string): Promise<Lead | null> {
-    const phoneE164 = this.normalizePhone(phone);
+    const defaultCountry = await this.resolveWorkspaceDefaultCountry(workspaceId);
+    const phoneE164 = this.normalizePhone(phone, defaultCountry);
     const { data, error } = await this.db
       .from('leads')
       .select('*')
@@ -97,11 +103,22 @@ export class LeadService {
     return data;
   }
 
-  private normalizePhone(phone: string): string {
-    const parsed = parsePhoneNumberFromString(phone, 'US');
+  private normalizePhone(phone: string, defaultCountry: string | null): string {
+    const country = (defaultCountry ?? 'US').toUpperCase() as never;
+    const parsed = parsePhoneNumberFromString(phone, country);
     if (!parsed || !parsed.isValid()) {
       throw new Error(`Invalid phone number: ${phone}`);
     }
     return parsed.format('E.164');
+  }
+
+  /** Look up the workspace's default outbound number country, if any. */
+  private async resolveWorkspaceDefaultCountry(workspaceId: string): Promise<string | null> {
+    try {
+      const phoneNumbers = new PhoneNumberService(this.db);
+      return await phoneNumbers.defaultCountry(workspaceId);
+    } catch {
+      return null;
+    }
   }
 }

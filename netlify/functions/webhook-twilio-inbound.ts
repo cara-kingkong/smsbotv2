@@ -2,6 +2,7 @@ import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
 import { MessagingService } from '../../src/lib/messaging/service';
+import { PhoneNumberService } from '../../src/lib/messaging/phone-numbers';
 import { QueueService } from '../../src/lib/queues/service';
 import { ConversationOutcome, ConversationStatus, CRMEventType } from '../../src/lib/types';
 import { ConversationService } from '../../src/lib/conversations/service';
@@ -42,16 +43,31 @@ export default async (req: Request, _context: Context) => {
 
     const inbound = twilioAdapter.parseInboundWebhook(body);
 
-    // Find active conversation by inbound phone number
-    const { data: lead } = await db
+    // Pin the workspace via the receiving number so the same lead phone
+    // can exist safely across workspaces. Falls back to a global lead
+    // lookup when the `To` number hasn't been registered yet — preserves
+    // legacy behaviour during migration.
+    const phoneNumbers = new PhoneNumberService(db);
+    const receivingNumber = inbound.to
+      ? await phoneNumbers.findByE164(inbound.to)
+      : null;
+
+    let leadQuery = db
       .from('leads')
       .select('id, workspace_id, external_contact_id')
-      .eq('phone_e164', inbound.from)
-      .limit(1)
-      .single();
+      .eq('phone_e164', inbound.from);
+
+    if (receivingNumber) {
+      leadQuery = leadQuery.eq('workspace_id', receivingNumber.workspace_id);
+    }
+
+    const { data: lead } = await leadQuery.limit(1).single();
 
     if (!lead) {
-      console.warn(`No lead found for phone: ${inbound.from}`);
+      console.warn(
+        `No lead found for phone ${inbound.from}` +
+          (receivingNumber ? ` in workspace ${receivingNumber.workspace_id}` : ' (no To-number workspace pinning)'),
+      );
       return new Response('<Response></Response>', {
         status: 200,
         headers: { 'Content-Type': 'text/xml' },

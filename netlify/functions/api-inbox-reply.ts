@@ -89,6 +89,8 @@ export default async (req: Request, _context: Context) => {
       sender_type: SenderType.Human,
     });
 
+    // `from` is omitted here so the send job resolves the workspace's
+    // country-matched number at dispatch time (falls back to env var).
     await queueService.enqueue({
       workspace_id: conversation.workspace_id,
       job_type: 'send_sms',
@@ -97,7 +99,6 @@ export default async (req: Request, _context: Context) => {
         conversation_id,
         message_id: message.id,
         to: lead.phone_e164,
-        from: process.env.TWILIO_PHONE_NUMBER!,
       },
     });
 

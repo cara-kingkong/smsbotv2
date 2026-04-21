@@ -8,6 +8,7 @@ import { CampaignService } from '../../src/lib/campaigns/service';
 import { WorkspaceService } from '../../src/lib/workspaces/service';
 import { BookingService } from '../../src/lib/calendar/service';
 import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
+import { PhoneNumberService } from '../../src/lib/messaging/phone-numbers';
 import { OpenAIAdapter } from '../../src/lib/ai/adapters/openai';
 import { AnthropicAdapter } from '../../src/lib/ai/adapters/anthropic';
 import {
@@ -81,6 +82,7 @@ export default async (req: Request, _context: Context) =>
     const campaignService = new CampaignService(db);
     const twilioAdapter = new TwilioAdapter(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
     const messagingService = new MessagingService(db, twilioAdapter);
+    const phoneNumbers = new PhoneNumberService(db);
 
     // Parallel fetch: version, lead, campaign are independent lookups
     const [version, lead, campaign] = await Promise.all([
@@ -100,6 +102,22 @@ export default async (req: Request, _context: Context) =>
 
     const workspaceService = new WorkspaceService(db);
     const workspace = await workspaceService.getById(campaign.workspace_id);
+
+    // Resolve the outbound "from" number for this lead. Country-aware; falls
+    // back to the workspace default, then to the legacy env var so existing
+    // deployments keep sending while they migrate.
+    const resolvedNumber = await phoneNumbers.resolveForLead(conversation.workspace_id, lead.phone_e164);
+    const fromNumber = resolvedNumber?.e164 ?? process.env.TWILIO_PHONE_NUMBER ?? null;
+    if (!fromNumber) {
+      console.error(`No outbound number available for workspace ${conversation.workspace_id}`);
+      await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: 'send_blocked_no_number',
+        event_payload_json: { workspace_id: conversation.workspace_id, lead_phone: lead.phone_e164 },
+      });
+      return new Response('No outbound number configured', { status: 200 });
+    }
 
     const hasCampaignStopConditions = campaign.stop_conditions_json?.max_messages !== undefined
       && Object.keys(campaign.stop_conditions_json).length > 0;
@@ -271,7 +289,7 @@ export default async (req: Request, _context: Context) =>
         const message = await messagingService.sendOutbound({
           conversation_id,
           to: lead.phone_e164,
-          from: process.env.TWILIO_PHONE_NUMBER!,
+          from: fromNumber,
           body_text: combinedReply,
           sender_type: SenderType.AI,
           source_job_id: jobId,
@@ -398,7 +416,7 @@ export default async (req: Request, _context: Context) =>
       const message = await messagingService.sendOutbound({
         conversation_id,
         to: lead.phone_e164,
-        from: process.env.TWILIO_PHONE_NUMBER!,
+        from: fromNumber,
         body_text: decision.reply_text,
         sender_type: SenderType.AI,
         source_job_id: jobId,
@@ -672,8 +690,6 @@ async function queueSystemMessage(
     sourceJobId?: string;
   },
 ) {
-  if (!process.env.TWILIO_PHONE_NUMBER) return;
-
   const messagingService = new MessagingService(db as never, {} as never);
   const message = await messagingService.queueOutbound({
     conversation_id: input.conversationId,
@@ -682,6 +698,8 @@ async function queueSystemMessage(
     source_job_id: input.sourceJobId,
   });
 
+  // `from` is intentionally omitted — process-send-sms-background resolves
+  // the workspace's country-matched number (or env fallback) at send time.
   await queueService.enqueue({
     workspace_id: input.workspaceId,
     job_type: 'process_send_sms',
@@ -690,7 +708,6 @@ async function queueSystemMessage(
       message_id: message.id,
       conversation_id: input.conversationId,
       to: input.to,
-      from: process.env.TWILIO_PHONE_NUMBER,
     },
   });
 }
