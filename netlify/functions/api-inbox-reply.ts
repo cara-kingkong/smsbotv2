@@ -5,9 +5,10 @@ import { MessagingService } from '../../src/lib/messaging/service';
 import { LeadService } from '../../src/lib/leads/service';
 import { QueueService } from '../../src/lib/queues/service';
 import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
-import { ConversationStatus, SenderType, ConversationEventType } from '../../src/lib/types';
+import { ConversationStatus, SenderType, ConversationEventType, WorkspaceRole } from '../../src/lib/types';
 import { sendManualMessageSchema } from '../../src/lib/utils/validation';
 import { requireWorkspaceAccess } from '../../src/lib/auth/request';
+import { requireRole } from '../../src/lib/auth/permissions';
 
 /**
  * Send a manual human reply in a conversation.
@@ -44,6 +45,8 @@ export default async (req: Request, _context: Context) => {
 
     const access = await requireWorkspaceAccess(req, conversation.workspace_id);
     if (access instanceof Response) return access;
+    const guard = requireRole(access, WorkspaceRole.Manager);
+    if (guard instanceof Response) return guard;
 
     // Prevent replies on terminal conversations
     const terminalStatuses = [

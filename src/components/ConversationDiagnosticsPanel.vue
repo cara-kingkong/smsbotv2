@@ -1,134 +1,118 @@
 <template>
-  <aside class="panel flex min-h-[520px] flex-col overflow-hidden p-0">
-    <div class="border-b border-slate-200/80 px-5 py-5">
-      <div class="page-kicker">Diagnostics</div>
-      <h2 class="section-title mt-3">Conversation state</h2>
-      <p class="section-copy mt-2">
-        Internal state, booking progress, and job outcomes for this thread.
-      </p>
+  <aside class="diag-panel">
+    <div class="diag-header">
+      <h2 class="text-[12px] font-semibold text-zinc-900">Diagnostics</h2>
     </div>
 
-    <div v-if="!conversationId" class="empty-state m-5 flex-1">
-      Select a conversation to inspect automation state.
+    <div v-if="!conversationId" class="flex flex-1 items-center justify-center p-4 text-sm text-zinc-400">
+      Select a conversation to inspect.
     </div>
 
     <template v-else>
-      <div class="flex-1 overflow-y-auto px-5 py-5">
+      <div class="diag-body">
         <div v-if="loading" class="space-y-2">
           <div v-for="i in 5" :key="i" class="skeleton-row"></div>
         </div>
         <div v-else-if="error" class="feedback-error">{{ error }}</div>
-        <div v-else-if="!diagnostics" class="empty-state">No diagnostics available.</div>
-        <div v-else class="space-y-5">
-          <section class="rounded-[18px] border border-slate-200/80 bg-white/92 p-4">
-            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Current State</div>
-            <div class="mt-3 flex flex-wrap gap-2">
+        <div v-else-if="!diagnostics" class="text-sm text-zinc-400">No diagnostics available.</div>
+        <div v-else>
+          <!-- Current State -->
+          <div class="diag-section">
+            <div class="diag-label">State</div>
+            <div class="mt-2 flex flex-wrap gap-1.5">
               <span class="badge" :class="statusClass(diagnostics.conversation.status)">
                 {{ diagnostics.conversation.status.replace(/_/g, ' ') }}
               </span>
               <span v-if="diagnostics.conversation.outcome" class="badge bg-emerald-50 text-emerald-700">
-                outcome: {{ diagnostics.conversation.outcome.replace(/_/g, ' ') }}
+                {{ diagnostics.conversation.outcome.replace(/_/g, ' ') }}
               </span>
               <span v-if="diagnostics.conversation.human_controlled" class="badge bg-sky-50 text-sky-700">
-                human controlled
+                human
               </span>
               <span v-if="diagnostics.conversation.needs_human" class="badge bg-amber-50 text-amber-700">
                 needs human
               </span>
-              <span v-if="latestQualification" class="badge bg-slate-100 text-slate-700">
+              <span v-if="latestQualification" class="badge bg-zinc-100 text-zinc-600">
                 {{ latestQualification.replace(/_/g, ' ') }}
               </span>
             </div>
-            <div class="mt-4 text-sm leading-6 text-slate-600">
-              {{ debugSummary }}
-            </div>
-          </section>
+            <p class="mt-2 text-[13px] leading-relaxed text-zinc-500">{{ debugSummary }}</p>
+          </div>
 
-          <section class="rounded-[18px] border border-slate-200/80 bg-white/92 p-4">
-            <div class="flex items-center justify-between gap-3">
-              <div class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Internal Markers</div>
-              <div v-if="latestDecisionTime" class="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+          <!-- Internal Markers -->
+          <div class="diag-section">
+            <div class="flex items-center justify-between">
+              <div class="diag-label">Markers</div>
+              <div v-if="latestDecisionTime" class="text-[11px] text-zinc-400">
                 {{ latestDecisionTime }}
               </div>
             </div>
-            <div class="mt-3 flex flex-wrap gap-2">
-              <span
-                v-for="tag in internalTags"
-                :key="tag"
-                class="badge bg-slate-100 text-slate-700"
-              >
+            <div class="mt-2 flex flex-wrap gap-1.5">
+              <span v-for="tag in internalTags" :key="tag" class="badge bg-zinc-100 text-zinc-600">
                 {{ tag }}
               </span>
-              <span v-if="internalTags.length === 0" class="text-sm text-slate-500">
-                No internal tags were emitted on the latest AI decision.
+              <span v-if="internalTags.length === 0" class="text-[13px] text-zinc-400">
+                No tags emitted.
               </span>
             </div>
-            <p v-if="latestReasonSummary" class="mt-4 text-sm leading-6 text-slate-600">
+            <p v-if="latestReasonSummary" class="mt-2 text-[13px] leading-relaxed text-zinc-500">
               {{ latestReasonSummary }}
             </p>
-          </section>
+          </div>
 
-          <section class="rounded-[18px] border border-slate-200/80 bg-white/92 p-4">
-            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Booking Trace</div>
-            <div v-if="bookingEvents.length === 0" class="mt-3 text-sm text-slate-500">
-              No booking events have been logged for this conversation yet.
+          <!-- Booking Trace -->
+          <div class="diag-section">
+            <div class="diag-label">Booking trace</div>
+            <div v-if="bookingEvents.length === 0" class="mt-2 text-[13px] text-zinc-400">
+              No booking events logged.
             </div>
-            <div v-else class="mt-3 space-y-3">
-              <div
-                v-for="event in bookingEvents"
-                :key="event.id"
-                class="rounded-[14px] border border-slate-200/70 bg-slate-50/80 px-3 py-3"
-              >
-                <div class="flex items-start justify-between gap-3">
+            <div v-else class="mt-2">
+              <div v-for="event in bookingEvents" :key="event.id" class="diag-event">
+                <div class="flex items-center justify-between gap-2">
                   <span class="badge" :class="eventBadgeClass(event.event_type)">
                     {{ event.event_type.replace(/_/g, ' ') }}
                   </span>
-                  <span class="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                    {{ formatDateTime(event.created_at) }}
-                  </span>
+                  <span class="text-[11px] text-zinc-400">{{ formatDateTime(event.created_at) }}</span>
                 </div>
                 <pre
                   v-if="hasPayload(event.event_payload_json)"
-                  class="mt-3 overflow-x-auto rounded-[12px] bg-slate-950 px-3 py-3 text-[11px] leading-5 text-slate-200"
+                  class="mt-2 overflow-x-auto rounded-md bg-zinc-900 px-2 py-2 text-[11px] leading-5 text-zinc-300"
                 ><code>{{ formatJson(event.event_payload_json) }}</code></pre>
               </div>
             </div>
-          </section>
+          </div>
 
-          <section class="rounded-[18px] border border-slate-200/80 bg-white/92 p-4">
-            <div class="flex items-center justify-between gap-3">
-              <div class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Related Jobs</div>
-              <a href="/admin/jobs" class="text-xs font-semibold text-teal-700 hover:text-teal-800">Open job queue</a>
+          <!-- Related Jobs -->
+          <div class="diag-section">
+            <div class="flex items-center justify-between">
+              <div class="diag-label">Jobs</div>
+              <a href="/admin/jobs" class="text-[11px] font-medium text-zinc-400 hover:text-zinc-700">View all</a>
             </div>
-            <div v-if="diagnostics.related_jobs.length === 0" class="mt-3 text-sm text-slate-500">
-              No related background jobs found for this conversation.
+            <div v-if="diagnostics.related_jobs.length === 0" class="mt-2 text-[13px] text-zinc-400">
+              No related jobs.
             </div>
-            <div v-else class="mt-3 space-y-3">
-              <div
-                v-for="job in diagnostics.related_jobs.slice(0, 6)"
-                :key="job.id"
-                class="rounded-[14px] border border-slate-200/70 bg-slate-50/80 px-3 py-3"
-              >
-                <div class="flex items-start justify-between gap-3">
-                  <div>
-                    <div class="text-sm font-semibold text-slate-900">{{ job.job_type }}</div>
-                    <div class="mt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+            <div v-else class="mt-2">
+              <div v-for="job in diagnostics.related_jobs.slice(0, 6)" :key="job.id" class="diag-event">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="min-w-0">
+                    <div class="text-[13px] font-medium text-zinc-900 truncate">{{ job.job_type }}</div>
+                    <div class="text-[11px] text-zinc-400">
                       {{ job.queue_name }} · {{ formatDateTime(job.created_at) }}
                     </div>
                   </div>
-                  <span class="badge" :class="jobBadgeClass(job.status)">
+                  <span class="badge shrink-0" :class="jobBadgeClass(job.status)">
                     {{ job.status.replace(/_/g, ' ') }}
                   </span>
                 </div>
-                <div class="mt-3 text-sm text-slate-600">
-                  Attempts {{ job.attempts }}/{{ job.max_attempts }}
+                <div class="mt-1 text-[12px] text-zinc-500">
+                  {{ job.attempts }}/{{ job.max_attempts }} attempts
                 </div>
-                <div v-if="job.last_error" class="mt-2 rounded-[12px] bg-red-50 px-3 py-2 text-sm text-red-700">
+                <div v-if="job.last_error" class="mt-1 rounded-md bg-red-50 px-2 py-1.5 text-[12px] text-red-700">
                   {{ job.last_error }}
                 </div>
               </div>
             </div>
-          </section>
+          </div>
         </div>
       </div>
     </template>

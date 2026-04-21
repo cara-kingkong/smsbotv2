@@ -1,0 +1,23 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import WorkspaceAdmin from '@components/WorkspaceAdmin.vue';
+import type { AuthSession } from '@lib/auth/middleware';
+import { isPlatformAdmin } from '@lib/auth/permissions';
+
+const session = (Astro.locals as Record<string, unknown>).session as AuthSession;
+const allowed = await isPlatformAdmin(session.user_id);
+if (!allowed) return Astro.redirect('/dashboard');
+---
+
+<BaseLayout title="Workspaces">
+  <div class="page-header">
+    <div class="page-header-row">
+      <div>
+        <h1 class="page-title">Workspaces</h1>
+        <p class="page-subtitle">Create workspaces, assign owners, and manage members.</p>
+      </div>
+    </div>
+  </div>
+
+  <WorkspaceAdmin client:load />
+</BaseLayout>

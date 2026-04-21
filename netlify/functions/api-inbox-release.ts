@@ -3,6 +3,8 @@ import { getServiceClient } from '../../src/lib/db/client';
 import { ConversationService } from '../../src/lib/conversations/service';
 import { QueueService } from '../../src/lib/queues/service';
 import { requireWorkspaceAccess } from '../../src/lib/auth/request';
+import { requireRole } from '../../src/lib/auth/permissions';
+import { WorkspaceRole } from '../../src/lib/types';
 
 /**
  * Release a conversation back to AI control.
@@ -32,6 +34,8 @@ export default async (req: Request, _context: Context) => {
 
     const access = await requireWorkspaceAccess(req, conversation.workspace_id);
     if (access instanceof Response) return access;
+    const guard = requireRole(access, WorkspaceRole.Manager);
+    if (guard instanceof Response) return guard;
 
     if (!conversation.human_controlled) {
       return new Response(

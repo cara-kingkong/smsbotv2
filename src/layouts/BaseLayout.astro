@@ -1,10 +1,11 @@
 ---
 import type { AuthSession } from '@lib/auth/middleware';
-import { ensureWorkspace } from '@lib/auth/ensure-workspace';
+import { resolveWorkspaceContext } from '@lib/auth/ensure-workspace';
 import { getPublicSupabaseConfig } from '@lib/config/public-server';
 import { getServiceClient } from '@lib/db/client';
 import { computeOnboardingState } from '@lib/onboarding/service';
 import type { OnboardingState } from '@lib/onboarding/service';
+import WorkspaceSwitcher from '@components/WorkspaceSwitcher.vue';
 import '../styles/global.css';
 
 interface Props {
@@ -15,9 +16,10 @@ const { title } = Astro.props as Props;
 
 // Session is guaranteed by middleware — all non-public routes are authenticated
 const session = (Astro.locals as Record<string, unknown>).session as AuthSession;
-const workspaceId = await ensureWorkspace(session);
+const workspaceContext = await resolveWorkspaceContext(session, Astro);
+const workspaceId = workspaceContext.activeWorkspaceId;
 
-// Fetch user display name and workspace name for the sidebar
+// Fetch user display name for the sidebar
 const db = getServiceClient();
 const { data: userRow } = await db
   .from('users')
@@ -25,14 +27,9 @@ const { data: userRow } = await db
   .eq('id', session.user_id)
   .single();
 
-const { data: workspaceRow } = await db
-  .from('workspaces')
-  .select('name')
-  .eq('id', workspaceId)
-  .single();
-
 const userName = userRow?.full_name || session.email.split('@')[0];
-const workspaceName = workspaceRow?.name || 'Workspace';
+const activeWorkspace = workspaceContext.availableWorkspaces.find((ws) => ws.id === workspaceId);
+const workspaceName = activeWorkspace?.name || 'Workspace';
 
 let onboardingState: OnboardingState;
 try {
@@ -56,6 +53,9 @@ const publicConfig = getPublicSupabaseConfig({
   userId: session.user_id,
   userEmail: session.email,
   userName,
+  activeWorkspaceRole: workspaceContext.activeRole,
+  isPlatformAdmin: workspaceContext.isPlatformAdmin,
+  availableWorkspaces: workspaceContext.availableWorkspaces,
 });
 
 const currentPath = Astro.url.pathname;
@@ -73,6 +73,10 @@ const adminNav = onboardingState.isActivated ? [
   { href: '/admin/webhooks', label: 'Webhooks' },
   { href: '/admin/jobs', label: 'Job Queue' },
   { href: '/admin/activity', label: 'Activity Log' },
+] : [];
+
+const platformNav = workspaceContext.isPlatformAdmin ? [
+  { href: '/admin/workspaces', label: 'Workspaces' },
 ] : [];
 
 const userInitial = userName.charAt(0).toUpperCase();
@@ -107,6 +111,7 @@ const userInitial = userName.charAt(0).toUpperCase();
             <span class="topbar-brand-label">Kong SMS</span>
           </a>
           <div class="topbar-right">
+            <WorkspaceSwitcher client:load />
             <a
               href="/settings"
               class:list={[
@@ -168,6 +173,20 @@ const userInitial = userName.charAt(0).toUpperCase();
                   <div class="nav-label">Operations</div>
                   <div class="space-y-1">
                     {adminNav.map(link => (
+                      <a href={link.href} class:list={['nav-link', currentPath.startsWith(link.href) && 'nav-link-active']}>
+                        <span>{link.label}</span>
+                        <span class="nav-link-dot"></span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {platformNav.length > 0 && (
+                <div class="nav-group-slim">
+                  <div class="nav-label">Platform</div>
+                  <div class="space-y-1">
+                    {platformNav.map(link => (
                       <a href={link.href} class:list={['nav-link', currentPath.startsWith(link.href) && 'nav-link-active']}>
                         <span>{link.label}</span>
                         <span class="nav-link-dot"></span>

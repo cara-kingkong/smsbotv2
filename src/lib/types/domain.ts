@@ -33,6 +33,7 @@ export interface User {
   email: string;
   full_name: string;
   auth_provider: string;
+  is_platform_admin: boolean;
   created_at: string;
 }
 

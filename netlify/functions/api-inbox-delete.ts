@@ -1,6 +1,8 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { requireWorkspaceAccess } from '../../src/lib/auth/request';
+import { requireRole } from '../../src/lib/auth/permissions';
+import { WorkspaceRole } from '../../src/lib/types';
 import { QueueService } from '../../src/lib/queues/service';
 
 /**
@@ -36,6 +38,8 @@ export default async (req: Request, _context: Context) => {
 
     const access = await requireWorkspaceAccess(req, conv.workspace_id);
     if (access instanceof Response) return access;
+    const guard = requireRole(access, WorkspaceRole.Manager);
+    if (guard instanceof Response) return guard;
 
     const { error } = await db
       .from('conversations')

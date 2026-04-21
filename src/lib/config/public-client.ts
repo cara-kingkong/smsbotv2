@@ -1,5 +1,11 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
+export interface AvailableWorkspace {
+  id: string;
+  name: string;
+  role: string;
+}
+
 export interface PublicSupabaseConfig {
   supabaseUrl: string;
   supabaseAnonKey: string;
@@ -7,6 +13,9 @@ export interface PublicSupabaseConfig {
   userId: string;
   userEmail: string;
   userName: string;
+  activeWorkspaceRole: string;
+  isPlatformAdmin: boolean;
+  availableWorkspaces: AvailableWorkspace[];
 }
 
 declare global {
@@ -45,6 +54,9 @@ export function getPublicSupabaseConfig(): PublicSupabaseConfig {
         userId: '',
         userEmail: '',
         userName: '',
+        activeWorkspaceRole: '',
+        isPlatformAdmin: false,
+        availableWorkspaces: [],
       };
     }
     throw new Error('Missing Supabase client config');
@@ -57,6 +69,9 @@ export function getPublicSupabaseConfig(): PublicSupabaseConfig {
     userId: runtimeConfig?.userId ?? '',
     userEmail: runtimeConfig?.userEmail ?? '',
     userName: runtimeConfig?.userName ?? '',
+    activeWorkspaceRole: runtimeConfig?.activeWorkspaceRole ?? '',
+    isPlatformAdmin: runtimeConfig?.isPlatformAdmin ?? false,
+    availableWorkspaces: runtimeConfig?.availableWorkspaces ?? [],
   };
 }
 
@@ -69,6 +84,9 @@ export function getSessionContext(): {
   userId: string;
   userEmail: string;
   userName: string;
+  activeWorkspaceRole: string;
+  isPlatformAdmin: boolean;
+  availableWorkspaces: AvailableWorkspace[];
 } {
   const config = typeof window !== 'undefined' ? window.__KONG_PUBLIC_CONFIG__ : undefined;
   return {
@@ -76,6 +94,9 @@ export function getSessionContext(): {
     userId: config?.userId ?? '',
     userEmail: config?.userEmail ?? '',
     userName: config?.userName ?? '',
+    activeWorkspaceRole: config?.activeWorkspaceRole ?? '',
+    isPlatformAdmin: config?.isPlatformAdmin ?? false,
+    availableWorkspaces: config?.availableWorkspaces ?? [],
   };
 }
 

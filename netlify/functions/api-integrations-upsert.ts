@@ -2,6 +2,8 @@ import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { IntegrationService } from '../../src/lib/integrations/service';
 import { requireWorkspaceAccess } from '../../src/lib/auth/request';
+import { requireRole } from '../../src/lib/auth/permissions';
+import { WorkspaceRole } from '../../src/lib/types';
 
 const VALID_TYPES = ['crm', 'calendar', 'sms', 'ai_provider'];
 const VALID_PROVIDERS = ['twilio', 'calendly', 'keap', 'openai', 'anthropic'];
@@ -49,6 +51,8 @@ export default async (req: Request, _context: Context) => {
 
     const access = await requireWorkspaceAccess(req, workspace_id);
     if (access instanceof Response) return access;
+    const guard = requireRole(access, WorkspaceRole.Owner);
+    if (guard instanceof Response) return guard;
 
     const service = new IntegrationService(db);
 

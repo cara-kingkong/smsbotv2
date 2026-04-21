@@ -1,3 +1,9 @@
+export interface AvailableWorkspace {
+  id: string;
+  name: string;
+  role: string;
+}
+
 export interface PublicSupabaseConfig {
   supabaseUrl: string;
   supabaseAnonKey: string;
@@ -5,6 +11,9 @@ export interface PublicSupabaseConfig {
   userId: string;
   userEmail: string;
   userName: string;
+  activeWorkspaceRole: string;
+  isPlatformAdmin: boolean;
+  availableWorkspaces: AvailableWorkspace[];
 }
 
 function firstDefined(...values: Array<string | undefined>): string {
@@ -20,6 +29,9 @@ export function getPublicSupabaseConfig(context?: {
   userId?: string;
   userEmail?: string;
   userName?: string;
+  activeWorkspaceRole?: string;
+  isPlatformAdmin?: boolean;
+  availableWorkspaces?: AvailableWorkspace[];
 }): PublicSupabaseConfig {
   const supabaseUrl = firstDefined(
     import.meta.env.PUBLIC_SUPABASE_URL,
@@ -45,5 +57,8 @@ export function getPublicSupabaseConfig(context?: {
     userId: context?.userId ?? '',
     userEmail: context?.userEmail ?? '',
     userName: context?.userName ?? '',
+    activeWorkspaceRole: context?.activeWorkspaceRole ?? '',
+    isPlatformAdmin: context?.isPlatformAdmin ?? false,
+    availableWorkspaces: context?.availableWorkspaces ?? [],
   };
 }

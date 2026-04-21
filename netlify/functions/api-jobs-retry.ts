@@ -1,7 +1,8 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
-import { JobStatus } from '../../src/lib/types';
+import { JobStatus, WorkspaceRole } from '../../src/lib/types';
 import { requireWorkspaceAccess } from '../../src/lib/auth/request';
+import { requireRole } from '../../src/lib/auth/permissions';
 
 /**
  * Retry a failed or dead-lettered job within a workspace.
@@ -40,6 +41,8 @@ export default async (req: Request, _context: Context) => {
 
     const access = await requireWorkspaceAccess(req, existing.workspace_id);
     if (access instanceof Response) return access;
+    const guard = requireRole(access, WorkspaceRole.Admin);
+    if (guard instanceof Response) return guard;
 
     if (workspace_id && workspace_id !== existing.workspace_id) {
       return new Response(JSON.stringify({ error: 'Job not found' }), { status: 404 });

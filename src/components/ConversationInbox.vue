@@ -1,19 +1,9 @@
 <template>
-  <div
-    class="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)_340px]"
-    style="min-height: calc(100vh - 280px);"
-  >
-    <aside class="panel flex min-h-[520px] flex-col overflow-hidden p-0">
-      <div class="border-b border-slate-200/80 px-5 py-5">
-        <div class="page-kicker">Conversation Triage</div>
-        <h2 class="section-title mt-3">Shared inbox</h2>
-        <p class="section-copy mt-2">
-          Scan live conversation state, filter by control mode, and jump into the right thread quickly.
-        </p>
-      </div>
-
-      <div class="border-b border-slate-200/70 px-4 py-4">
-        <div class="pill-tabs">
+  <div class="inbox-layout">
+    <!-- Conversation list sidebar -->
+    <aside class="inbox-sidebar">
+      <div class="inbox-sidebar-header">
+        <div class="flex flex-wrap gap-1">
           <button
             v-for="f in filters"
             :key="f.value"
@@ -26,141 +16,128 @@
         </div>
       </div>
 
-      <div class="flex-1 overflow-y-auto px-3 py-3">
-        <div v-if="loading" class="space-y-2 p-1">
+      <div class="inbox-sidebar-list">
+        <div v-if="loading" class="space-y-1 p-3">
           <div v-for="i in 6" :key="i" class="skeleton-row"></div>
         </div>
-        <div v-else-if="loadError" class="empty-state min-h-full">{{ loadError }}</div>
-        <div v-else-if="conversations.length === 0" class="empty-state min-h-full">
+        <div v-else-if="loadError" class="p-4 text-sm text-zinc-400">{{ loadError }}</div>
+        <div v-else-if="conversations.length === 0" class="p-4 text-sm text-zinc-400">
           No conversations found{{ currentFilter ? ' for this filter' : '' }}.
         </div>
-        <div v-else class="space-y-2">
+        <div v-else>
           <button
             v-for="conv in conversations"
             :key="conv.id"
-            class="list-card"
-            :class="
-              selectedId === conv.id
-                ? 'list-card-active'
-                : ''
-            "
+            class="inbox-item"
+            :class="selectedId === conv.id ? 'inbox-item-active' : ''"
             @click="select(conv)"
           >
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <div class="text-sm font-semibold text-slate-900">{{ leadName(conv) }}</div>
-                <div class="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                  {{ relativeTime(conv.last_activity_at) }}
-                </div>
-              </div>
-              <span class="badge" :class="statusClass(conv.status)">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-[13px] font-medium text-zinc-900 truncate">{{ leadName(conv) }}</span>
+              <span class="badge shrink-0" :class="statusClass(conv.status)">
                 {{ conv.status.replace(/_/g, ' ') }}
               </span>
             </div>
-            <p class="mt-3 text-sm leading-6 text-slate-600">{{ lastPreview(conv) }}</p>
+            <p class="mt-1 text-[12px] text-zinc-400 truncate">{{ lastPreview(conv) }}</p>
+            <div class="mt-1 text-[11px] text-zinc-300">{{ relativeTime(conv.last_activity_at) }}</div>
           </button>
         </div>
       </div>
     </aside>
 
-    <section class="panel flex min-h-[520px] flex-col overflow-hidden p-0">
-      <div v-if="!selected" class="empty-state m-5 flex-1">
-        Select a conversation to review messages, take control, or reply manually.
+    <!-- Thread pane -->
+    <section class="inbox-thread">
+      <div v-if="!selected" class="flex flex-1 items-center justify-center text-sm text-zinc-400">
+        Select a conversation from the list.
       </div>
 
       <template v-else>
-        <div class="border-b border-slate-200/80 px-5 py-5">
-          <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <div class="flex flex-wrap items-center gap-2">
-                <h2 class="section-title">{{ leadName(selected) }}</h2>
-                <span class="badge" :class="statusClass(selected.status)">
+        <!-- Thread header -->
+        <div class="inbox-thread-header">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <h2 class="text-sm font-semibold text-zinc-900 truncate">{{ leadName(selected) }}</h2>
+                <span class="badge shrink-0" :class="statusClass(selected.status)">
                   {{ selected.status.replace(/_/g, ' ') }}
                 </span>
-                <span v-if="selected.outcome" class="badge bg-emerald-50 text-emerald-700">
+                <span v-if="selected.outcome" class="badge shrink-0 bg-emerald-50 text-emerald-700">
                   {{ selected.outcome.replace(/_/g, ' ') }}
                 </span>
               </div>
-              <p class="mt-2 text-sm text-slate-500">{{ selected.lead?.phone_e164 ?? '' }}</p>
+              <p class="mt-0.5 text-[12px] text-zinc-400">{{ selected.lead?.phone_e164 ?? '' }}</p>
             </div>
+          </div>
 
-            <div class="flex flex-wrap gap-2">
+          <div class="flex items-center gap-2 shrink-0">
+            <button
+              v-if="!isTerminal && selected.human_controlled"
+              class="button-secondary"
+              :disabled="actionLoading"
+              @click="release"
+            >
+              {{ actionLoading ? 'Releasing...' : 'Release to AI' }}
+            </button>
+            <button
+              v-if="!isTerminal && !selected.human_controlled"
+              class="button-primary"
+              :disabled="actionLoading"
+              @click="takeover"
+            >
+              {{ actionLoading ? 'Taking over...' : 'Take Over' }}
+            </button>
+            <template v-if="confirmingDelete">
+              <span class="text-[12px] font-medium text-red-600">Delete?</span>
               <button
-                v-if="!isTerminal && selected.human_controlled"
-                class="button-secondary"
-                :disabled="actionLoading"
-                @click="release"
-              >
-                {{ actionLoading ? 'Releasing...' : 'Release to AI' }}
-              </button>
-              <button
-                v-if="!isTerminal && !selected.human_controlled"
-                class="button-primary"
-                :disabled="actionLoading"
-                @click="takeover"
-              >
-                {{ actionLoading ? 'Taking over...' : 'Take Over' }}
-              </button>
-              <template v-if="confirmingDelete">
-                <span class="text-sm font-medium text-red-600">Delete this conversation?</span>
-                <button
-                  class="button-secondary !text-red-600 hover:!bg-red-50"
-                  :disabled="actionLoading"
-                  @click="executeDelete"
-                >
-                  {{ actionLoading ? 'Deleting...' : 'Confirm' }}
-                </button>
-                <button
-                  class="button-secondary"
-                  :disabled="actionLoading"
-                  @click="confirmingDelete = false"
-                >
-                  Cancel
-                </button>
-              </template>
-              <button
-                v-else
                 class="button-secondary !text-red-600 hover:!bg-red-50"
                 :disabled="actionLoading"
-                @click="confirmingDelete = true"
+                @click="executeDelete"
               >
-                Delete
+                {{ actionLoading ? '...' : 'Confirm' }}
               </button>
-            </div>
+              <button
+                class="button-secondary"
+                :disabled="actionLoading"
+                @click="confirmingDelete = false"
+              >
+                Cancel
+              </button>
+            </template>
+            <button
+              v-else
+              class="button-secondary !text-red-600 hover:!bg-red-50"
+              :disabled="actionLoading"
+              @click="confirmingDelete = true"
+            >
+              Delete
+            </button>
           </div>
         </div>
 
-        <div class="border-b border-slate-200/70 px-5 py-3">
-          <div class="rounded-[16px] px-4 py-3 text-sm font-medium" :class="bannerClass">
-            {{ bannerText }}
-          </div>
+        <!-- Status banner -->
+        <div class="inbox-banner" :class="bannerClass">
+          {{ bannerText }}
         </div>
 
-        <div
-          ref="threadRef"
-          class="flex-1 overflow-y-auto px-5 py-5"
-          style="background: linear-gradient(180deg, rgba(255,255,255,0.42), rgba(245,247,244,0.78));"
-        >
-          <div v-if="messagesLoading" class="space-y-3 p-2">
+        <!-- Messages -->
+        <div ref="threadRef" class="inbox-messages">
+          <div v-if="messagesLoading" class="space-y-3 p-4">
             <div v-for="i in 5" :key="i" class="flex" :class="i % 2 === 0 ? 'justify-end' : 'justify-start'">
-              <div class="skeleton-card" :style="{ width: `${45 + (i * 7) % 30}%`, height: '3.5rem' }"></div>
+              <div class="skeleton-card" :style="{ width: `${45 + (i * 7) % 30}%`, height: '2.5rem' }"></div>
             </div>
           </div>
-          <div v-else-if="messagesError" class="empty-state min-h-full">{{ messagesError }}</div>
-          <div v-else-if="messages.length === 0" class="empty-state min-h-full">No messages yet.</div>
-          <div v-else class="flex flex-col gap-3">
+          <div v-else-if="messagesError" class="p-4 text-sm text-zinc-400">{{ messagesError }}</div>
+          <div v-else-if="messages.length === 0" class="p-4 text-sm text-zinc-400">No messages yet.</div>
+          <div v-else class="flex flex-col gap-2 p-4">
             <div
               v-for="msg in messages"
               :key="msg.id"
               class="flex"
               :class="msg.direction === 'inbound' ? 'justify-start' : 'justify-end'"
             >
-              <div
-                class="max-w-[86%] rounded-[24px] px-4 py-3 text-sm leading-6 shadow-sm sm:max-w-[72%]"
-                :class="messageClass(msg)"
-              >
+              <div class="msg-bubble" :class="messageClass(msg)">
                 <div>{{ msg.body_text }}</div>
-                <div class="mt-2 text-[11px] font-semibold uppercase tracking-[0.14em]" :class="metaClass(msg)">
+                <div class="msg-meta" :class="metaClass(msg)">
                   {{ senderLabel(msg.sender_type) }} · {{ formatTime(msg.sent_at ?? msg.received_at ?? msg.created_at) }}
                   <template v-if="msg.direction === 'outbound' && msg.provider_status">
                     · {{ msg.provider_status }}
@@ -171,35 +148,33 @@
           </div>
         </div>
 
-        <div v-if="!isTerminal" class="border-t border-slate-200/80 px-5 py-5">
-          <div class="rounded-[18px] border border-slate-200/80 bg-white/92 p-3">
-            <textarea
-              ref="replyRef"
-              v-model="replyText"
-              class="textarea min-h-[72px] border-0 bg-transparent px-2 py-2 shadow-none focus:shadow-none"
-              placeholder="Type an SMS reply and press Enter to send..."
-              rows="1"
-              :disabled="sendLoading"
-              @keydown.enter.exact.prevent="send"
-              @input="autoResize"
-            />
-            <div class="mt-3 flex items-center justify-between gap-3">
-              <p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                Enter sends immediately
-              </p>
-              <button
-                class="button-primary"
-                :disabled="sendLoading || !replyText.trim()"
-                @click="send"
-              >
-                {{ sendLoading ? 'Sending...' : 'Send reply' }}
-              </button>
-            </div>
+        <!-- Reply box -->
+        <div v-if="!isTerminal" class="inbox-reply">
+          <textarea
+            ref="replyRef"
+            v-model="replyText"
+            class="inbox-reply-input"
+            placeholder="Type a reply... Enter to send"
+            rows="1"
+            :disabled="sendLoading"
+            @keydown.enter.exact.prevent="send"
+            @input="autoResize"
+          />
+          <div class="flex items-center justify-between gap-3 mt-2">
+            <span class="text-[11px] text-zinc-300">Enter sends</span>
+            <button
+              class="button-primary"
+              :disabled="sendLoading || !replyText.trim()"
+              @click="send"
+            >
+              {{ sendLoading ? 'Sending...' : 'Send' }}
+            </button>
           </div>
         </div>
       </template>
     </section>
 
+    <!-- Diagnostics panel -->
     <ConversationDiagnosticsPanel :conversation-id="selected?.id ?? null" />
   </div>
 </template>
@@ -274,7 +249,7 @@ const isTerminal = computed(() =>
 
 const bannerClass = computed(() => {
   if (!selected.value) return '';
-  if (isTerminal.value) return 'bg-slate-100 text-slate-600';
+  if (isTerminal.value) return 'bg-zinc-100 text-zinc-500';
   if (selected.value.human_controlled) return 'bg-sky-50 text-sky-700';
   return 'bg-emerald-50 text-emerald-700';
 });
@@ -315,18 +290,18 @@ function statusClass(status: string): string {
 
 function messageClass(msg: Msg): string {
   if (msg.direction === 'inbound') {
-    return 'border border-slate-200/80 bg-white text-slate-800';
+    return 'bg-zinc-100 text-zinc-800';
   }
   if (msg.sender_type === 'human') {
-    return 'bg-amber-50 text-amber-950';
+    return 'bg-amber-50 text-amber-900';
   }
-  return 'bg-teal-600 text-white';
+  return 'bg-zinc-900 text-white';
 }
 
 function metaClass(msg: Msg): string {
-  if (msg.direction === 'inbound') return 'text-slate-400';
-  if (msg.sender_type === 'human') return 'text-amber-700';
-  return 'text-teal-100';
+  if (msg.direction === 'inbound') return 'text-zinc-400';
+  if (msg.sender_type === 'human') return 'text-amber-600';
+  return 'text-zinc-400';
 }
 
 function senderLabel(type: string): string {

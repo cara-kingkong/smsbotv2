@@ -2,6 +2,8 @@ import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { CalendarManagementService } from '../../src/lib/calendar/management';
 import { requireWorkspaceAccess } from '../../src/lib/auth/request';
+import { requireRole } from '../../src/lib/auth/permissions';
+import { WorkspaceRole } from '../../src/lib/types';
 
 /**
  * Create a calendar target for a workspace.
@@ -29,6 +31,8 @@ export default async (req: Request, _context: Context) => {
 
     const access = await requireWorkspaceAccess(req, workspace_id);
     if (access instanceof Response) return access;
+    const guard = requireRole(access, WorkspaceRole.Manager);
+    if (guard instanceof Response) return guard;
 
     // Verify integration belongs to this workspace
     const { data: integration, error: intError } = await db

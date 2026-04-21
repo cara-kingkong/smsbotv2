@@ -1,6 +1,8 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { requireWorkspaceAccess } from '../../src/lib/auth/request';
+import { requireRole } from '../../src/lib/auth/permissions';
+import { WorkspaceRole } from '../../src/lib/types';
 
 /**
  * Update an agent.
@@ -40,6 +42,8 @@ export default async (req: Request, _context: Context) => {
     const workspaceId = (agent.campaigns as { workspace_id: string } | null)?.workspace_id;
     const access = await requireWorkspaceAccess(req, workspaceId);
     if (access instanceof Response) return access;
+    const guard = requireRole(access, WorkspaceRole.Manager);
+    if (guard instanceof Response) return guard;
 
     // Build update payload with only provided fields
     const updates: Record<string, unknown> = {};

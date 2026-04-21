@@ -2,6 +2,8 @@ import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { WorkspaceService } from '../../src/lib/workspaces/service';
 import { requireWorkspaceAccess } from '../../src/lib/auth/request';
+import { requireRole } from '../../src/lib/auth/permissions';
+import { WorkspaceRole } from '../../src/lib/types';
 
 /**
  * Update workspace settings (business hours + stop conditions).
@@ -21,6 +23,8 @@ export default async (req: Request, _context: Context) => {
     const { workspace_id, business_hours_json, stop_conditions_json } = body;
     const access = await requireWorkspaceAccess(req, workspace_id);
     if (access instanceof Response) return access;
+    const guard = requireRole(access, WorkspaceRole.Owner);
+    if (guard instanceof Response) return guard;
 
     const updates: Record<string, unknown> = {};
     if (business_hours_json !== undefined) updates.business_hours_json = business_hours_json;

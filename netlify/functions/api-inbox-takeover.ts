@@ -1,8 +1,9 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { ConversationService } from '../../src/lib/conversations/service';
-import { ConversationStatus } from '../../src/lib/types';
+import { ConversationStatus, WorkspaceRole } from '../../src/lib/types';
 import { requireWorkspaceAccess } from '../../src/lib/auth/request';
+import { requireRole } from '../../src/lib/auth/permissions';
 
 /**
  * Human takeover of a conversation.
@@ -32,6 +33,8 @@ export default async (req: Request, _context: Context) => {
 
     const access = await requireWorkspaceAccess(req, conversation.workspace_id);
     if (access instanceof Response) return access;
+    const guard = requireRole(access, WorkspaceRole.Manager);
+    if (guard instanceof Response) return guard;
 
     // Prevent takeover on terminal conversations
     const terminalStatuses = [

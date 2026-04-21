@@ -25,83 +25,16 @@ const publicConfig = getPublicSupabaseConfig();
     </script>
   </head>
   <body>
-    <main class="login-shell">
-      <section class="hidden lg:block">
-        <div class="login-showcase">
-          <div class="app-window-controls">
-            <span class="app-window-dot app-window-dot-red"></span>
-            <span class="app-window-dot app-window-dot-yellow"></span>
-            <span class="app-window-dot app-window-dot-green"></span>
-          </div>
-          <p class="login-kicker">Operations Control Center</p>
-          <h1 class="login-title">A calmer, more structured workspace for SMS operations.</h1>
-          <p class="login-copy">
-            Review inbox activity, compare campaign performance, and manage workspace settings from one clean operating surface.
-          </p>
+    <main class="login-page">
+      <div class="login-card">
+        <div class="login-brand">KS</div>
+        <h1 class="login-heading">Sign in to Kong SMS</h1>
+        <p class="login-subtext">Use your Google account to continue.</p>
 
-          <div class="login-proof-grid">
-            <div class="login-proof-card">
-              <div class="login-proof-value">Inbox</div>
-              <div class="login-proof-label">Live triage</div>
-              <p class="login-proof-copy">Move from workspace-level signals into the exact conversation that needs manual attention.</p>
-            </div>
-            <div class="login-proof-card">
-              <div class="login-proof-value">Campaigns</div>
-              <div class="login-proof-label">Campaign control</div>
-              <p class="login-proof-copy">Tune prompts, compare agents, and review conversion performance without leaving the workspace.</p>
-            </div>
-            <div class="login-proof-card">
-              <div class="login-proof-value">Workspace</div>
-              <div class="login-proof-label">Workspace access</div>
-              <p class="login-proof-copy">Authentication and workspace context stay secured server-side before protected routes render.</p>
-            </div>
-          </div>
-
-          <div class="login-bullets">
-            <div class="login-bullet">Conversation state, campaign settings, and integrations follow one consistent operating model.</div>
-            <div class="login-bullet">Built for agency teams managing multiple clients, handoffs, and AI-assisted workflows.</div>
-          </div>
-        </div>
-      </section>
-
-      <section class="auth-card">
-        <div class="mb-8">
-          <p class="page-kicker">Welcome Back</p>
-          <h1 class="page-title text-[2.4rem] sm:text-[2.7rem]">Sign in</h1>
-          <p class="page-subtitle max-w-none">
-            Access your workspace to manage conversations, review campaign performance, and keep operator handoff under control.
-          </p>
-        </div>
-
-        <div class="auth-logo-card">
-          <div class="flex items-center gap-3">
-            <div class="app-brand-mark">KS</div>
-            <div>
-              <div class="section-title text-lg">Kong SMS</div>
-              <p class="section-copy">Secure Google sign-in for authenticated workspace access.</p>
-            </div>
-          </div>
-        </div>
-
-        <button class="button-primary mt-6 w-full" id="google-signin">
+        <button class="button-primary w-full mt-6" id="google-signin">
           Continue with Google
         </button>
-
-        <div class="auth-trust-list">
-          <div class="auth-trust-item">
-            <span class="auth-trust-dot"></span>
-            <div>Google OAuth redirects back through <span class="font-semibold text-slate-800">/auth/callback</span> after successful sign-in.</div>
-          </div>
-          <div class="auth-trust-item">
-            <span class="auth-trust-dot"></span>
-            <div>Workspace access stays authenticated server-side before protected routes render.</div>
-          </div>
-          <div class="auth-trust-item">
-            <span class="auth-trust-dot"></span>
-            <div>Use the same login to reach dashboard reporting, campaign controls, and the shared inbox.</div>
-          </div>
-        </div>
-      </section>
+      </div>
     </main>
 
     <script>

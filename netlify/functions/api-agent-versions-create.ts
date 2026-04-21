@@ -2,6 +2,8 @@ import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { AgentService } from '../../src/lib/agents/service';
 import { requireWorkspaceAccess } from '../../src/lib/auth/request';
+import { requireRole } from '../../src/lib/auth/permissions';
+import { WorkspaceRole } from '../../src/lib/types';
 
 /**
  * Create a new version for an agent.
@@ -41,6 +43,8 @@ export default async (req: Request, _context: Context) => {
     const workspaceId = (agent.campaigns as { workspace_id: string } | null)?.workspace_id;
     const access = await requireWorkspaceAccess(req, workspaceId);
     if (access instanceof Response) return access;
+    const guard = requireRole(access, WorkspaceRole.Manager);
+    if (guard instanceof Response) return guard;
 
     const agentService = new AgentService(db);
     const version = await agentService.createVersion({
