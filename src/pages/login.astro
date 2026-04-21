@@ -6,6 +6,8 @@ import '../styles/global.css';
 const existingSession = (Astro.locals as Record<string, unknown>).session;
 if (existingSession) return Astro.redirect('/dashboard');
 const publicConfig = getPublicSupabaseConfig();
+const passwordLoginEnabled =
+  (import.meta.env.PUBLIC_ENABLE_PASSWORD_LOGIN ?? process.env.PUBLIC_ENABLE_PASSWORD_LOGIN) === 'true';
 ---
 
 <!doctype html>
@@ -34,6 +36,26 @@ const publicConfig = getPublicSupabaseConfig();
         <button class="button-primary w-full mt-6" id="google-signin">
           Continue with Google
         </button>
+
+        {passwordLoginEnabled && (
+          <>
+            <div class="login-divider"><span>or</span></div>
+            <form id="password-signin" class="login-password-form">
+              <label>
+                <span>Email</span>
+                <input type="email" name="email" autocomplete="email" required />
+              </label>
+              <label>
+                <span>Password</span>
+                <input type="password" name="password" autocomplete="current-password" required />
+              </label>
+              <p id="password-error" class="login-error" role="alert"></p>
+              <button type="submit" class="button-primary w-full">
+                Sign in with email
+              </button>
+            </form>
+          </>
+        )}
       </div>
     </main>
 
@@ -55,6 +77,14 @@ const publicConfig = getPublicSupabaseConfig();
         return new URL('/auth/callback', window.location.origin).toString();
       }
 
+      function setSessionCookies(session: { access_token: string; refresh_token: string }) {
+        const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie =
+          `sb-access-token=${encodeURIComponent(session.access_token)}; path=/; max-age=3600; SameSite=Lax${secure}`;
+        document.cookie =
+          `sb-refresh-token=${encodeURIComponent(session.refresh_token)}; path=/; max-age=604800; SameSite=Lax${secure}`;
+      }
+
       document.getElementById('google-signin')?.addEventListener('click', async () => {
         const { error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
@@ -64,6 +94,81 @@ const publicConfig = getPublicSupabaseConfig();
         });
         if (error) console.error('Sign-in error:', error.message);
       });
+
+      const passwordForm = document.getElementById('password-signin') as HTMLFormElement | null;
+      const errorEl = document.getElementById('password-error');
+      passwordForm?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (errorEl) errorEl.textContent = '';
+
+        const formData = new FormData(passwordForm);
+        const email = String(formData.get('email') ?? '').trim();
+        const password = String(formData.get('password') ?? '');
+
+        const submitBtn = passwordForm.querySelector<HTMLButtonElement>('button[type="submit"]');
+        if (submitBtn) submitBtn.disabled = true;
+
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+        if (error || !data.session) {
+          if (errorEl) errorEl.textContent = error?.message ?? 'Sign-in failed';
+          if (submitBtn) submitBtn.disabled = false;
+          return;
+        }
+
+        setSessionCookies(data.session);
+        window.location.replace('/dashboard');
+      });
     </script>
+
+    <style>
+      .login-divider {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 24px 0 16px;
+        color: var(--text-muted);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .login-divider::before,
+      .login-divider::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: var(--border);
+      }
+      .login-password-form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .login-password-form label {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 13px;
+        color: var(--text);
+      }
+      .login-password-form input {
+        padding: 8px 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        color: var(--text-strong);
+        font: inherit;
+      }
+      .login-password-form input:focus {
+        outline: 2px solid var(--brand);
+        outline-offset: 1px;
+      }
+      .login-error {
+        min-height: 1em;
+        margin: 0;
+        color: #b91c1c;
+        font-size: 13px;
+      }
+    </style>
   </body>
 </html>
