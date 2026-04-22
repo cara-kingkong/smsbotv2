@@ -23,9 +23,19 @@ export default async (req: Request, _context: Context) => {
     const payload = (await req.json()) as StartConversationWebhookPayload;
 
     // Validate required fields
-    if (!payload.workspace_id || !payload.campaign_id || !payload.lead?.phone || !payload.lead?.first_name) {
+    if (
+      !payload.workspace_id ||
+      !payload.campaign_id ||
+      !payload.lead?.phone ||
+      !payload.lead?.first_name ||
+      !payload.lead?.email ||
+      !payload.lead?.timezone
+    ) {
       return new Response(
-        JSON.stringify({ error: 'Missing required fields: workspace_id, campaign_id, lead.phone, lead.first_name' }),
+        JSON.stringify({
+          error:
+            'Missing required fields: workspace_id, campaign_id, lead.phone, lead.first_name, lead.email, lead.timezone',
+        }),
         { status: 400 },
       );
     }

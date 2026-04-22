@@ -225,11 +225,14 @@
 
             <button
               class="button-primary"
-              :disabled="startConvLoading || !selectedCampaignId"
+              :disabled="startConvLoading || !selectedCampaignId || !canStartConversation"
               @click="startConversation"
             >
               {{ startConvLoading ? 'Starting...' : 'Start Conversation' }}
             </button>
+            <p v-if="!canStartConversation" class="form-help text-amber-700">
+              This lead is missing {{ missingLeadFields }}. Add it before starting a conversation.
+            </p>
           </div>
           <div v-if="startConvError" class="feedback-error">{{ startConvError }}</div>
           <div v-if="startConvSuccess" class="feedback-success">{{ startConvSuccess }}</div>
@@ -290,6 +293,21 @@ interface CampaignOption {
 }
 const campaigns = ref<CampaignOption[]>([]);
 const selectedCampaignId = ref<string>('');
+
+const canStartConversation = computed(() => {
+  const lead = selectedLead.value;
+  if (!lead) return false;
+  return Boolean(lead.email && lead.timezone);
+});
+
+const missingLeadFields = computed(() => {
+  const lead = selectedLead.value;
+  if (!lead) return '';
+  const missing: string[] = [];
+  if (!lead.email) missing.push('an email');
+  if (!lead.timezone) missing.push('a timezone');
+  return missing.join(' and ');
+});
 
 // Timezone combobox state
 const allTimezones: string[] = (() => {

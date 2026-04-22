@@ -109,10 +109,14 @@
         Send a test request using the example above. Fill in a real phone number and name below.
       </p>
 
-      <div class="mt-4 grid gap-4 sm:grid-cols-3 max-w-2xl">
+      <div class="mt-4 grid gap-4 sm:grid-cols-2 max-w-2xl">
         <div>
           <label class="form-label">Phone *</label>
           <input v-model="testPhone" type="tel" placeholder="+1 555 123 4567" class="input" />
+        </div>
+        <div>
+          <label class="form-label">Email *</label>
+          <input v-model="testEmail" type="email" placeholder="jane@example.com" class="input" />
         </div>
         <div>
           <label class="form-label">First Name *</label>
@@ -122,11 +126,16 @@
           <label class="form-label">Last Name</label>
           <input v-model="testLastName" type="text" placeholder="Doe" class="input" />
         </div>
+        <div class="sm:col-span-2">
+          <label class="form-label">Timezone *</label>
+          <input v-model="testTimezone" type="text" placeholder="America/New_York" class="input" />
+          <p class="form-help mt-1">IANA timezone — used for business-hours checks.</p>
+        </div>
       </div>
 
       <button
         class="button-primary mt-4"
-        :disabled="!selectedCampaignId || !testPhone || !testFirstName || testLoading"
+        :disabled="!selectedCampaignId || !testPhone || !testFirstName || !testEmail || !testTimezone || testLoading"
         @click="sendTest"
       >
         {{ testLoading ? 'Sending...' : 'Send Test Request' }}
@@ -203,6 +212,8 @@ const copiedField = ref('');
 const testPhone = ref('');
 const testFirstName = ref('');
 const testLastName = ref('');
+const testEmail = ref('');
+const testTimezone = ref('');
 const testLoading = ref(false);
 const testError = ref('');
 const testSuccess = ref('');
@@ -218,9 +229,9 @@ const fields = [
   { name: 'campaign_id', type: 'string (UUID)', required: true, description: 'Campaign to assign the lead to' },
   { name: 'lead.phone', type: 'string', required: true, description: 'Phone number (E.164 preferred, e.g. +14155551234)' },
   { name: 'lead.first_name', type: 'string', required: true, description: 'Lead\'s first name' },
+  { name: 'lead.email', type: 'string', required: true, description: 'Lead\'s email address (required for booking)' },
+  { name: 'lead.timezone', type: 'string', required: true, description: 'IANA timezone (e.g. America/New_York) — required for business-hours checks' },
   { name: 'lead.last_name', type: 'string', required: false, description: 'Lead\'s last name' },
-  { name: 'lead.email', type: 'string', required: false, description: 'Lead\'s email address' },
-  { name: 'lead.timezone', type: 'string', required: false, description: 'IANA timezone (e.g. America/New_York)' },
   { name: 'lead.external_contact_id', type: 'string', required: false, description: 'CRM contact ID for syncing' },
   { name: 'idempotency_key', type: 'string', required: false, description: 'Unique key to prevent duplicate processing' },
   { name: 'source_metadata', type: 'object', required: false, description: 'Arbitrary JSON for tracking lead source' },
@@ -234,6 +245,7 @@ const examplePayload = computed(() => ({
     first_name: 'Jane',
     last_name: 'Doe',
     email: 'jane@example.com',
+    timezone: 'America/New_York',
   },
   source_metadata: { source: 'api' },
 }));
@@ -269,6 +281,8 @@ async function sendTest() {
         lead: {
           phone: testPhone.value,
           first_name: testFirstName.value,
+          email: testEmail.value,
+          timezone: testTimezone.value,
           last_name: testLastName.value || undefined,
         },
         source_metadata: { source: 'api_guide_test' },

@@ -96,7 +96,7 @@
               class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
             />
             <label for="phone-is-default" class="text-sm text-slate-700">
-              Make this the workspace default (used when no country matches)
+              Prefer this number when multiple are configured for {{ form.country_code }}
             </label>
           </div>
         </div>

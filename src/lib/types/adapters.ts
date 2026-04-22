@@ -102,9 +102,9 @@ export interface StartConversationWebhookPayload {
   lead: {
     phone: string;
     first_name: string;
+    email: string;
+    timezone: string;
     last_name?: string;
-    email?: string;
-    timezone?: string;
     external_contact_id?: string;
     tags?: string[];
     custom_fields?: Record<string, unknown>;
