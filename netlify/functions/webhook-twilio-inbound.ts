@@ -270,8 +270,7 @@ export default async (req: Request, _context: Context) => {
       const queueService = new QueueService(db);
 
       // Look up the agent version's cadence settings
-      let coalesceSec = 8; // default coalesce window
-      let initialDelaySec = 0;
+      let replyDelaySec = 30;
       if (conversation.agent_version_id) {
         const { data: agentVersion } = await db
           .from('agent_versions')
@@ -280,25 +279,22 @@ export default async (req: Request, _context: Context) => {
           .single();
 
         const cadence = agentVersion?.reply_cadence_json;
-        if (cadence?.coalesce_window_seconds !== undefined && cadence.coalesce_window_seconds >= 0) {
-          coalesceSec = cadence.coalesce_window_seconds;
-        }
-        if (cadence?.initial_delay_seconds && cadence.initial_delay_seconds > 0) {
-          initialDelaySec = cadence.initial_delay_seconds;
+        if (cadence?.reply_delay_seconds !== undefined && cadence.reply_delay_seconds >= 0) {
+          replyDelaySec = cadence.reply_delay_seconds;
+        } else if (cadence?.initial_delay_seconds !== undefined || cadence?.coalesce_window_seconds !== undefined) {
+          // Legacy fallback: sum the old two-field format
+          replyDelaySec = (Number(cadence.coalesce_window_seconds) || 0) + (Number(cadence.initial_delay_seconds) || 0);
         }
       }
 
-      // Cancel any pending AI reply job for this conversation (debounce reset)
+      // Cancel any pending AI reply job for this conversation (debounce reset).
+      // Each inbound message restarts the reply delay timer.
       const cancelled = await queueService.cancelPendingAIReplies(conversation.id);
       if (cancelled > 0) {
         console.log(`Coalesced: cancelled ${cancelled} pending AI reply job(s) for ${conversation.id}`);
       }
 
-      // Schedule a fresh AI reply job. The total delay from this message is
-      // coalesce_window + initial_delay so the AI waits for more messages AND
-      // then adds a realistic typing pause before responding.
-      const totalDelaySec = coalesceSec + initialDelaySec;
-      const runAt = totalDelaySec > 0 ? new Date(Date.now() + totalDelaySec * 1000) : undefined;
+      const runAt = replyDelaySec > 0 ? new Date(Date.now() + replyDelaySec * 1000) : undefined;
 
       await queueService.enqueue({
         workspace_id: lead.workspace_id,

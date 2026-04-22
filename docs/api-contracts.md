@@ -417,9 +417,9 @@ Create a new agent version.
     "max_message_length": 320
   },
   "reply_cadence": {
-    "initial_reply_delay_seconds": 30,
-    "followup_delay_minutes": 15,
-    "max_followups": 3
+    "reply_delay_seconds": 30,
+    "followup_delay_seconds": 3600,
+    "max_followups": 5
   },
   "allowed_actions": {
     "can_book": true,

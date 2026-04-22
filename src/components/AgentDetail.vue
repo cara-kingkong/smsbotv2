@@ -168,15 +168,11 @@
 
               <fieldset class="panel-muted space-y-4">
                 <legend class="form-label">Reply Cadence</legend>
-                <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <div>
-                    <label class="form-label">Message Window (s)</label>
-                    <input v-model.number="versionForm.coalesce_window_seconds" type="number" min="0" max="30" class="input" />
-                    <p class="mt-1 text-xs text-slate-500">Wait for rapid-fire messages</p>
-                  </div>
-                  <div>
-                    <label class="form-label">Initial Delay (s)</label>
-                    <input v-model.number="versionForm.initial_delay_seconds" type="number" min="0" class="input" />
+                    <label class="form-label">Reply Delay (s)</label>
+                    <input v-model.number="versionForm.reply_delay_seconds" type="number" min="0" class="input" />
+                    <p class="mt-1 text-xs text-slate-500">Wait before replying; resets if another message arrives</p>
                   </div>
                   <div>
                     <label class="form-label">Followup Delay (s)</label>
@@ -394,8 +390,7 @@ interface PromptFields {
   prompt_text: string;
   tone: string;
   max_message_length: number;
-  coalesce_window_seconds: number;
-  initial_delay_seconds: number;
+  reply_delay_seconds: number;
   followup_delay_seconds: number;
   max_followups: number;
   can_book: boolean;
@@ -410,8 +405,7 @@ const DEFAULT_PROMPT_FIELDS: PromptFields = {
   prompt_text: '',
   tone: 'friendly',
   max_message_length: 160,
-  coalesce_window_seconds: 8,
-  initial_delay_seconds: 30,
+  reply_delay_seconds: 30,
   followup_delay_seconds: 3600,
   max_followups: 5,
   can_book: true,
@@ -486,8 +480,9 @@ function normalizeVersion(version?: VersionRecord | null): PromptFields {
     prompt_text: version.prompt_text ?? '',
     tone: String(systemRules.tone ?? 'friendly'),
     max_message_length: Number(systemRules.max_message_length ?? 160),
-    coalesce_window_seconds: Number(cadence.coalesce_window_seconds ?? 8),
-    initial_delay_seconds: Number(cadence.initial_delay_seconds ?? 30),
+    reply_delay_seconds: cadence.reply_delay_seconds !== undefined
+      ? Number(cadence.reply_delay_seconds)
+      : (Number(cadence.coalesce_window_seconds) || 0) + (Number(cadence.initial_delay_seconds) || 30),
     followup_delay_seconds: Number(cadence.followup_delay_seconds ?? 3600),
     max_followups: Number(cadence.max_followups ?? 5),
     can_book: Boolean(actions.can_book ?? true),
@@ -509,8 +504,7 @@ function promptFingerprint(fields: PromptFields): string {
     prompt_text: fields.prompt_text,
     tone: fields.tone,
     max_message_length: fields.max_message_length,
-    coalesce_window_seconds: fields.coalesce_window_seconds,
-    initial_delay_seconds: fields.initial_delay_seconds,
+    reply_delay_seconds: fields.reply_delay_seconds,
     followup_delay_seconds: fields.followup_delay_seconds,
     max_followups: fields.max_followups,
     can_book: fields.can_book,
@@ -530,8 +524,7 @@ function buildVersionPayload(fields: PromptFields) {
       max_message_length: fields.max_message_length,
     },
     reply_cadence_json: {
-      coalesce_window_seconds: fields.coalesce_window_seconds,
-      initial_delay_seconds: fields.initial_delay_seconds,
+      reply_delay_seconds: fields.reply_delay_seconds,
       followup_delay_seconds: fields.followup_delay_seconds,
       max_followups: fields.max_followups,
     },

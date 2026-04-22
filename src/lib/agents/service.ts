@@ -251,7 +251,7 @@ export class AgentService {
       prompt_text: input.prompt_text,
       system_rules_json: input.system_rules_json ?? {},
       reply_cadence_json: input.reply_cadence_json ?? {
-        initial_delay_seconds: 30,
+        reply_delay_seconds: 30,
         followup_delay_seconds: 3600,
         max_followups: 5,
       },

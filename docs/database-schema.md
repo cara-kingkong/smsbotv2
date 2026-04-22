@@ -934,15 +934,18 @@ Suggested shape:
 ```
 
 ## 6.3 agent_versions.reply_cadence_json
-Suggested shape:
 
 ```json
 {
-  "initial_reply_delay_seconds": 30,
-  "followup_delay_minutes": 15,
-  "max_followups": 3
+  "reply_delay_seconds": 30,
+  "followup_delay_seconds": 3600,
+  "max_followups": 5
 }
 ```
+
+- `reply_delay_seconds` — seconds to wait before sending a reply. Each new inbound message resets the timer, so rapid-fire texts are automatically coalesced.
+- `followup_delay_seconds` — seconds between automated follow-up messages when the lead goes quiet.
+- `max_followups` — maximum number of follow-up messages before the agent stops.
 
 ## 6.4 calendars.eligibility_rules_json
 Suggested shape:

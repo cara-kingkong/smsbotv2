@@ -123,7 +123,7 @@ export default async (req: Request, _context: Context) => {
     // Queue initial AI reply job
     const cadence = version.reply_cadence_json as Record<string, number> | null;
     const isManualStart = payload.source_metadata?.source === 'manual_ui';
-    const delaySec = isManualStart ? 0 : (cadence?.initial_delay_seconds ?? 0);
+    const delaySec = isManualStart ? 0 : (cadence?.reply_delay_seconds ?? cadence?.initial_delay_seconds ?? 0);
     const runAt = new Date(Date.now() + delaySec * 1000);
 
     const queueService = new QueueService(db);

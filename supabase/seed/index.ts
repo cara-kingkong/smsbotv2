@@ -215,7 +215,7 @@ async function seed() {
         tone: 'friendly_casual',
       },
       reply_cadence_json: {
-        initial_delay_seconds: 30,
+        reply_delay_seconds: 30,
         followup_delay_seconds: 3600,
         max_followups: 5,
       },
@@ -251,7 +251,7 @@ async function seed() {
         tone: 'professional_direct',
       },
       reply_cadence_json: {
-        initial_delay_seconds: 15,
+        reply_delay_seconds: 15,
         followup_delay_seconds: 1800,
         max_followups: 3,
       },

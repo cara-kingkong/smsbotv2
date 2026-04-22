@@ -77,10 +77,9 @@ export const createAgentVersionSchema = z.object({
   system_rules_json: z.record(z.unknown()).optional(),
   reply_cadence_json: z
     .object({
-      initial_delay_seconds: z.number().min(0),
+      reply_delay_seconds: z.number().min(0),
       followup_delay_seconds: z.number().min(0),
       max_followups: z.number().min(0),
-      coalesce_window_seconds: z.number().min(0).max(30).optional(),
     })
     .optional(),
   config_json: z.record(z.unknown()).optional(),

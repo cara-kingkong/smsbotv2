@@ -42,7 +42,7 @@ function makeVersion(overrides: Partial<AgentVersion> = {}): AgentVersion {
     version_number: 1,
     prompt_text: 'You are a helpful agent.',
     system_rules_json: {},
-    reply_cadence_json: { initial_delay_seconds: 30, followup_delay_seconds: 3600, max_followups: 5 },
+    reply_cadence_json: { reply_delay_seconds: 30, followup_delay_seconds: 3600, max_followups: 5 },
     config_json: {},
     is_active: true,
     created_at: new Date().toISOString(),

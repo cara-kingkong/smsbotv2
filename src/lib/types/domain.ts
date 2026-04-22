@@ -118,12 +118,11 @@ export interface Agent {
 }
 
 export interface ReplyCadence {
-  initial_delay_seconds: number;
+  /** Seconds to wait before sending a reply. Each new inbound message resets
+   *  the timer, so rapid-fire texts are automatically coalesced. Default 30s. */
+  reply_delay_seconds: number;
   followup_delay_seconds: number;
   max_followups: number;
-  /** Seconds to wait for additional rapid-fire messages before generating a reply.
-   *  Each new inbound message resets the timer. Default 8s. */
-  coalesce_window_seconds?: number;
 }
 
 export interface AllowedActions {
