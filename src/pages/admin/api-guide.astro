@@ -1,0 +1,17 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import ApiGuide from '@components/ApiGuide.vue';
+---
+
+<BaseLayout title="API Guide">
+  <div class="page-header">
+    <div class="page-header-row">
+      <div>
+        <h1 class="page-title">API Guide</h1>
+        <p class="page-subtitle">How to create leads and start conversations via the API.</p>
+      </div>
+    </div>
+  </div>
+
+  <ApiGuide client:load />
+</BaseLayout>
