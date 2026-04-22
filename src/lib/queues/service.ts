@@ -88,7 +88,7 @@ export class QueueService {
   async markFailed(jobId: string, workerId: string, errorMessage: string): Promise<void> {
     const { data: job } = await this.db
       .from('jobs')
-      .select('attempts, max_attempts')
+      .select('attempts, max_attempts, job_type, queue_name, payload_json')
       .eq('id', jobId)
       .eq('worker_id', workerId)
       .eq('status', JobStatus.Running)
@@ -122,6 +122,40 @@ export class QueueService {
       .from('jobs')
       .update(updates)
       .eq('id', jobId);
+
+    // Make failures loud:
+    //   - Always log with structured fields so Netlify logs are greppable.
+    //   - When the job carries a conversation_id, emit a conversation_event so
+    //     the failure surfaces in the Inbox diagnostics panel instead of being
+    //     buried in the jobs table.
+    const logPrefix = shouldDeadLetter ? '[QueueService] DEAD-LETTERED' : '[QueueService] failed (will retry)';
+    console.error(
+      `${logPrefix} job_id=${jobId} type=${job.job_type} queue=${job.queue_name} attempts=${attempts}/${maxAttempts}: ${errorMessage}`,
+    );
+
+    const payload = (job.payload_json ?? {}) as Record<string, unknown>;
+    const conversationId = typeof payload.conversation_id === 'string' ? payload.conversation_id : null;
+    if (conversationId) {
+      const eventType = shouldDeadLetter
+        ? `${job.job_type}_dead_lettered`
+        : `${job.job_type}_failed`;
+      const { error: eventError } = await this.db.from('conversation_events').insert({
+        conversation_id: conversationId,
+        event_type: eventType,
+        event_payload_json: {
+          job_id: jobId,
+          job_type: job.job_type,
+          queue_name: job.queue_name,
+          attempts,
+          max_attempts: maxAttempts,
+          error: errorMessage,
+          next_retry_at: shouldDeadLetter ? null : retryAt,
+        },
+      });
+      if (eventError) {
+        console.error(`[QueueService] failed to emit ${eventType} event for conversation=${conversationId}:`, eventError);
+      }
+    }
   }
 
   async cancelByConversation(conversationId: string): Promise<void> {
