@@ -45,7 +45,16 @@ export class QueueService {
       p_lease_seconds: leaseSeconds,
     });
 
-    if (error || !data) return null;
+    if (error) {
+      // Never swallow: a misconfigured RPC (e.g. stale function signature) here
+      // silently stalls every queue. Surface it so process-queue can alert.
+      console.error(
+        `[QueueService.claimNext] RPC failed for queue=${queueName} worker=${workerId}:`,
+        error,
+      );
+      return null;
+    }
+    if (!data) return null;
     return data as Job;
   }
 
