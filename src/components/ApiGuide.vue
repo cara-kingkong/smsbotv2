@@ -23,6 +23,60 @@
       </div>
     </section>
 
+    <!-- Your IDs -->
+    <section class="panel p-6">
+      <h3 class="section-title">Your IDs</h3>
+      <p class="section-copy mt-2">
+        Use these values for <code class="text-xs bg-slate-50 px-1.5 py-0.5 rounded">workspace_id</code>
+        and <code class="text-xs bg-slate-50 px-1.5 py-0.5 rounded">campaign_id</code> in your request.
+      </p>
+
+      <div class="mt-5 space-y-4">
+        <div>
+          <label class="form-label">Workspace ID</label>
+          <div class="flex items-center gap-3">
+            <code class="flex-1 rounded-xl bg-slate-50 px-4 py-2.5 text-sm font-mono text-slate-800 select-all break-all">
+              {{ workspaceId || 'Loading...' }}
+            </code>
+            <button
+              class="button-secondary text-xs"
+              :disabled="!workspaceId"
+              @click="copyToClipboard(workspaceId, 'workspace')"
+            >
+              {{ copiedField === 'workspace' ? 'Copied!' : 'Copy' }}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label class="form-label">Campaign</label>
+          <select v-model="selectedCampaignId" class="input max-w-sm">
+            <option value="" disabled>Select a campaign...</option>
+            <option v-for="c in campaigns" :key="c.id" :value="c.id">{{ c.name }}</option>
+          </select>
+          <p v-if="campaigns.length === 0 && !loading" class="mt-2 text-sm text-slate-500">
+            No active campaigns.
+            <a href="/campaigns" class="text-teal-700 hover:text-teal-800 font-medium">Create one first.</a>
+          </p>
+        </div>
+
+        <div v-if="selectedCampaignId">
+          <label class="form-label">Campaign ID</label>
+          <div class="flex items-center gap-3">
+            <code class="flex-1 rounded-xl bg-slate-50 px-4 py-2.5 text-sm font-mono text-slate-800 select-all break-all">
+              {{ selectedCampaignId }}
+            </code>
+            <button
+              class="button-secondary text-xs"
+              @click="copyToClipboard(selectedCampaignId, 'campaign')"
+            >
+              {{ copiedField === 'campaign' ? 'Copied!' : 'Copy' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Required fields -->
     <section class="panel p-6">
       <h3 class="section-title">Request Body</h3>
@@ -57,20 +111,8 @@
     <section class="panel p-6">
       <h3 class="section-title">Your Example Payload</h3>
       <p class="section-copy mt-2">
-        Pre-filled with your workspace ID. Select a campaign below.
+        Pre-filled with your workspace and campaign IDs from above.
       </p>
-
-      <div class="mt-4">
-        <label class="form-label">Campaign</label>
-        <select v-model="selectedCampaignId" class="input max-w-sm">
-          <option value="" disabled>Select a campaign...</option>
-          <option v-for="c in campaigns" :key="c.id" :value="c.id">{{ c.name }}</option>
-        </select>
-        <p v-if="campaigns.length === 0 && !loading" class="mt-2 text-sm text-slate-500">
-          No active campaigns.
-          <a href="/campaigns" class="text-teal-700 hover:text-teal-800 font-medium">Create one first.</a>
-        </p>
-      </div>
 
       <!-- JSON payload -->
       <div class="mt-5 relative">
@@ -219,7 +261,7 @@ const testError = ref('');
 const testSuccess = ref('');
 const testResponse = ref('');
 
-let workspaceId = '';
+const workspaceId = ref('');
 
 const siteOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://your-site.netlify.app';
 const endpointUrl = computed(() => `${siteOrigin}/.netlify/functions/webhook-start-conversation`);
@@ -238,7 +280,7 @@ const fields = [
 ];
 
 const examplePayload = computed(() => ({
-  workspace_id: workspaceId || 'YOUR_WORKSPACE_ID',
+  workspace_id: workspaceId.value || 'YOUR_WORKSPACE_ID',
   campaign_id: selectedCampaignId.value || 'YOUR_CAMPAIGN_ID',
   lead: {
     phone: '+14155551234',
@@ -265,7 +307,7 @@ async function copyToClipboard(text: string, field = 'url') {
 }
 
 async function sendTest() {
-  if (!workspaceId || !selectedCampaignId.value) return;
+  if (!workspaceId.value || !selectedCampaignId.value) return;
   testError.value = '';
   testSuccess.value = '';
   testResponse.value = '';
@@ -276,7 +318,7 @@ async function sendTest() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        workspace_id: workspaceId,
+        workspace_id: workspaceId.value,
         campaign_id: selectedCampaignId.value,
         lead: {
           phone: testPhone.value,
@@ -308,14 +350,14 @@ async function sendTest() {
 
 onMounted(async () => {
   const ctx = getSessionContext();
-  workspaceId = ctx.workspaceId || '';
+  workspaceId.value = ctx.workspaceId || '';
 
-  if (!workspaceId) {
+  if (!workspaceId.value) {
     loading.value = false;
     return;
   }
 
-  const params = new URLSearchParams({ workspace_id: workspaceId, status: 'active' });
+  const params = new URLSearchParams({ workspace_id: workspaceId.value, status: 'active' });
   const res = await fetch(`${API_BASE}/api-campaigns-list?${params}`);
   if (res.ok) {
     campaigns.value = await res.json();
