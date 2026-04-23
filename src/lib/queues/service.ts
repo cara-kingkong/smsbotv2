@@ -54,7 +54,7 @@ export class QueueService {
       );
       return null;
     }
-    if (!data) return null;
+    if (!data || !(data as Record<string, unknown>).id) return null;
     return data as Job;
   }
 
