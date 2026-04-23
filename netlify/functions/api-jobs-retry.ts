@@ -48,7 +48,7 @@ export default async (req: Request, _context: Context) => {
       return new Response(JSON.stringify({ error: 'Job not found' }), { status: 404 });
     }
 
-    const retryableStatuses = [JobStatus.Failed, JobStatus.DeadLettered];
+    const retryableStatuses = [JobStatus.Failed, JobStatus.DeadLettered, JobStatus.Pending];
     if (!retryableStatuses.includes(existing.status)) {
       return new Response(
         JSON.stringify({ error: `Job cannot be retried from status: ${existing.status}` }),

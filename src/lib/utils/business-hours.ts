@@ -1,4 +1,4 @@
-import { toZonedTime } from 'date-fns-tz';
+import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 import type { BusinessHours } from '@lib/types';
 
 /**
@@ -46,7 +46,9 @@ export function getNextBusinessHoursStart(
       startTime.setHours(startHour, startMin, 0, 0);
 
       if (startTime > zonedNow) {
-        return startTime;
+        // startTime's hours are in the lead's timezone (via the shifted
+        // zonedNow base) — convert back to real UTC before returning.
+        return fromZonedTime(startTime, tz);
       }
 
       // If same day but start already passed, check if still within range

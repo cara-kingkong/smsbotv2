@@ -210,7 +210,7 @@ function badgeTextClass(status: string): string {
 }
 
 function isRetryable(status: string): boolean {
-  return status === 'failed' || status === 'dead_lettered';
+  return status === 'failed' || status === 'dead_lettered' || status === 'pending';
 }
 
 function truncate(str: string, max: number): string {
