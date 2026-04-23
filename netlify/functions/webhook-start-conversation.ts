@@ -4,6 +4,7 @@ import { LeadService } from '../../src/lib/leads/service';
 import { ConversationService } from '../../src/lib/conversations/service';
 import { AgentService } from '../../src/lib/agents/service';
 import { QueueService } from '../../src/lib/queues/service';
+import { PhoneNumberService } from '../../src/lib/messaging/phone-numbers';
 import type { StartConversationWebhookPayload } from '../../src/lib/types';
 import { nanoid } from 'nanoid';
 
@@ -90,6 +91,25 @@ export default async (req: Request, _context: Context) => {
       external_contact_id: payload.lead.external_contact_id,
       source_json: payload.source_metadata,
     });
+
+    // Check workspace has a phone number that can reach this lead's country
+    const phoneNumbers = new PhoneNumberService(db);
+    const fromNumber = await phoneNumbers.resolveForLead(payload.workspace_id, lead.phone_e164);
+    if (!fromNumber) {
+      await db
+        .from('webhook_receipts')
+        .update({ processed_status: 'completed' })
+        .eq('workspace_id', payload.workspace_id)
+        .eq('idempotency_key', idempotencyKey);
+
+      return new Response(
+        JSON.stringify({
+          message: 'No phone number available for lead country — lead created, conversation skipped',
+          lead_id: lead.id,
+        }),
+        { status: 200 },
+      );
+    }
 
     // Check for existing active conversation
     const conversationService = new ConversationService(db);
