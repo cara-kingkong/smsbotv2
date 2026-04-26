@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getServiceClient } from '@lib/db/client';
 import { QueueService } from '@lib/queues/service';
+import { notifyError } from '@lib/utils/google-chat-notify';
 
 interface QueueJobMeta {
   job_id?: string;
@@ -56,6 +57,7 @@ export async function runQueueJob<T extends Record<string, unknown>>(
     return response ?? new Response('OK', { status: 200 });
   } catch (err) {
     console.error(`${label} error:`, err);
+    await notifyError(`Job failed: ${label}`, err, { job_id: jobId ?? 'unknown' });
 
     if (jobId && workerId) {
       try {

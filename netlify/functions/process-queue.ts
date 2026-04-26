@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
 import { getServiceClient } from '../../src/lib/db/client';
 import { QueueService } from '../../src/lib/queues/service';
+import { notifyError } from '../../src/lib/utils/google-chat-notify';
 
 /** Run every minute on Netlify */
 export const config: Config = {
@@ -82,6 +83,11 @@ export default async (_req: Request, _context: Context) => {
     console.log(summaryLine, { per_queue: stats });
   } else {
     console.error(`${summaryLine} UNHEALTHY`, { per_queue: stats, stuck });
+    await notifyError('Queue unhealthy', summaryLine, {
+      dispatch_failures: totals.dispatchFailures,
+      claim_errors: totals.claimErrors,
+      stuck_jobs: stuck.count,
+    });
   }
 
   const body = JSON.stringify({

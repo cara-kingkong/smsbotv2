@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { notifyError } from '@lib/utils/google-chat-notify';
 
 /**
  * Catch-all Astro API route that delegates to Netlify function handlers.
@@ -92,6 +93,7 @@ const handle: APIRoute = async ({ params, request }) => {
     return await handlers[fnName](request, {});
   } catch (err) {
     console.error(`API route error [${fnName}]:`, err);
+    await notifyError(`API error: ${fnName}`, err);
     return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
