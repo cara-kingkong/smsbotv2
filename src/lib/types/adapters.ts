@@ -106,6 +106,7 @@ export interface StartConversationWebhookPayload {
     timezone: string;
     last_name?: string;
     external_contact_id?: string;
+    crm_provider?: string;
     tags?: string[];
     custom_fields?: Record<string, unknown>;
   };

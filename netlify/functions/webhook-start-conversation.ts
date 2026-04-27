@@ -89,6 +89,7 @@ export default async (req: Request, _context: Context) => {
       email: payload.lead.email,
       timezone: payload.lead.timezone,
       external_contact_id: payload.lead.external_contact_id,
+      crm_provider: payload.lead.crm_provider,
       source_json: payload.source_metadata,
     });
 

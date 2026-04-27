@@ -20,7 +20,7 @@ export default async (req: Request, _context: Context) => {
 
   try {
     const body = await req.json();
-    const { workspace_id, phone, first_name, last_name, email, timezone, external_contact_id, source_metadata } = body;
+    const { workspace_id, phone, first_name, last_name, email, timezone, external_contact_id, crm_provider, source_metadata } = body;
 
     if (!workspace_id || !phone || !first_name) {
       return new Response(
@@ -43,6 +43,7 @@ export default async (req: Request, _context: Context) => {
       email,
       timezone,
       external_contact_id,
+      crm_provider,
       source_json: source_metadata,
     });
 

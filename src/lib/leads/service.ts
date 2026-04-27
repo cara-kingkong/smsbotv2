@@ -46,6 +46,7 @@ export class LeadService {
           email: input.email || existing.email,
           timezone: input.timezone || existing.timezone,
           external_contact_id: input.external_contact_id || existing.external_contact_id,
+          crm_provider: input.crm_provider || existing.crm_provider,
         })
         .eq('id', existing.id)
         .select()

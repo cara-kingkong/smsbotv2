@@ -275,6 +275,7 @@ const fields = [
   { name: 'lead.timezone', type: 'string', required: true, description: 'IANA timezone (e.g. America/New_York) — required for business-hours checks' },
   { name: 'lead.last_name', type: 'string', required: false, description: 'Lead\'s last name' },
   { name: 'lead.external_contact_id', type: 'string', required: false, description: 'CRM contact ID for syncing' },
+  { name: 'lead.crm_provider', type: 'string', required: false, description: 'CRM provider name (e.g. "keap", "hubspot")' },
   { name: 'idempotency_key', type: 'string', required: false, description: 'Unique key to prevent duplicate processing' },
   { name: 'source_metadata', type: 'object', required: false, description: 'Arbitrary JSON for tracking lead source' },
 ];
