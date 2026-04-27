@@ -31,6 +31,7 @@ export async function notifyError(label: string, error: unknown, extra?: Record<
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=UTF-8' },
       body: JSON.stringify({ text: lines.join('\n') }),
+      signal: AbortSignal.timeout(5000),
     });
   } catch {
     // Swallow — never let notification failures cascade
