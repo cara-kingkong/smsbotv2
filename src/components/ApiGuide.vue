@@ -289,6 +289,8 @@ const examplePayload = computed(() => ({
     last_name: 'Doe',
     email: 'jane@example.com',
     timezone: 'America/New_York',
+    external_contact_id: 'crm-contact-123',
+    crm_provider: 'keap',
   },
   source_metadata: { source: 'api' },
 }));
