@@ -9,6 +9,7 @@
         v-for="card in providerCards"
         :key="card.provider"
         class="panel flex h-full flex-col"
+        :class="card.provider === 'twilio' && card.envConfigured ? 'opacity-75' : ''"
       >
         <div class="flex items-start justify-between gap-3">
           <div>
@@ -17,6 +18,13 @@
             <p class="section-copy mt-2">{{ card.description }}</p>
           </div>
           <span
+            v-if="card.provider === 'twilio' && card.envConfigured"
+            class="badge bg-slate-100 text-slate-600"
+          >
+            Env-managed
+          </span>
+          <span
+            v-else
             class="badge"
             :class="card.connected ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'"
           >
@@ -31,10 +39,11 @@
         <div v-if="!card.expanded" class="mt-5 flex-1">
           <div class="note-box">
             <template v-if="card.provider === 'twilio' && card.envConfigured">
-              Connected via server environment variables. No additional configuration needed.
+              <p class="font-medium text-slate-700">Twilio config is set in env vars.</p>
+              <p class="mt-1 text-slate-500">This section will be activated once Twilio vars are moved to workspace config.</p>
             </template>
             <template v-else-if="card.provider === 'twilio' && !card.envConfigured && !card.connected">
-              Twilio credentials must be set as environment variables on the server (<span class="font-mono text-xs">TWILIO_ACCOUNT_SID</span>, <span class="font-mono text-xs">TWILIO_AUTH_TOKEN</span>, <span class="font-mono text-xs">TWILIO_PHONE_NUMBER</span>).
+              Twilio credentials must be set as environment variables on the server (<span class="font-mono text-xs">TWILIO_ACCOUNT_SID</span>, <span class="font-mono text-xs">TWILIO_AUTH_TOKEN</span>). Outbound numbers are configured per-workspace in the Phone Numbers section.
             </template>
             <template v-else-if="card.connected">
               Saved label: <span class="font-semibold text-slate-900">{{ card.savedName }}</span>
@@ -65,10 +74,9 @@
               <label class="form-label">Auth Token</label>
               <input v-model="card.form.auth_token" type="password" placeholder="********" class="input" />
             </div>
-            <div>
-              <label class="form-label">Phone Number</label>
-              <input v-model="card.form.phone_number" type="tel" placeholder="+1..." class="input" />
-            </div>
+            <p class="text-xs text-slate-500">
+              Phone numbers are managed in the Phone Numbers section, not here.
+            </p>
           </template>
 
           <template v-else-if="card.provider === 'openai'">
@@ -175,7 +183,6 @@ interface ProviderCard {
 interface TwilioEnvStatus {
   account_sid: boolean;
   auth_token: boolean;
-  phone_number: boolean;
   configured: boolean;
 }
 
@@ -198,7 +205,7 @@ const providerCards = reactive<ProviderCard[]>([
     saveSuccess: '',
     saveError: '',
     validationMessage: '',
-    form: { label: '', account_sid: '', auth_token: '', phone_number: '' },
+    form: { label: '', account_sid: '', auth_token: '' },
   },
   {
     provider: 'openai',
@@ -328,8 +335,7 @@ function buildConfigJson(card: ProviderCard): Record<string, unknown> {
   if (card.provider === 'twilio') {
     config.account_sid_ref = card.form.account_sid ? 'TWILIO_ACCOUNT_SID' : '';
     config.auth_token_ref = card.form.auth_token ? 'TWILIO_AUTH_TOKEN' : '';
-    config.phone_number = card.form.phone_number;
-    config.configured = !!(card.form.account_sid && card.form.auth_token && card.form.phone_number);
+    config.configured = !!(card.form.account_sid && card.form.auth_token);
   } else if (card.provider === 'openai') {
     config.api_key_ref = card.form.api_key ? 'OPENAI_API_KEY' : '';
     config.model = card.form.model || 'gpt-4o';
@@ -394,7 +400,7 @@ function validateConfig(card: ProviderCard) {
   if (!card.connected) return;
 
   const requiredFields: Record<string, string[]> = {
-    twilio: ['account_sid', 'auth_token', 'phone_number'],
+    twilio: ['account_sid', 'auth_token'],
     openai: ['api_key', 'model'],
     anthropic: ['api_key', 'model'],
     calendly: ['api_key'],

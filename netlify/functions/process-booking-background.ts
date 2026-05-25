@@ -236,7 +236,6 @@ export default async (req: Request, _context: Context) =>
           message_id: confirmationMessage.id,
           conversation_id,
           to: lead.phone_e164,
-          from: process.env.TWILIO_PHONE_NUMBER!,
         },
       });
 
