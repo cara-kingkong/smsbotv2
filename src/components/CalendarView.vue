@@ -65,11 +65,16 @@
       <section class="panel">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <div class="page-kicker">Connected</div>
+            <div class="page-kicker">{{ envConfigured ? 'Env-managed' : 'Connected' }}</div>
             <h2 class="section-title mt-2">{{ savedLabel }}</h2>
             <p class="section-copy mt-1">Your Calendly is connected and available for automatic booking.</p>
           </div>
-          <span class="badge bg-emerald-50 text-emerald-700">Connected</span>
+          <span
+            class="badge"
+            :class="envConfigured ? 'bg-slate-100 text-slate-600' : 'bg-emerald-50 text-emerald-700'"
+          >
+            {{ envConfigured ? 'Env-managed' : 'Connected' }}
+          </span>
         </div>
 
         <div class="mt-5 grid gap-3 sm:grid-cols-2">
@@ -84,7 +89,17 @@
         </div>
       </section>
 
-      <section class="panel">
+      <section v-if="envConfigured" class="panel opacity-75">
+        <h3 class="section-title">API Credential</h3>
+        <div class="note-box mt-3">
+          <p class="font-medium text-slate-700">Calendly API key is set in env vars.</p>
+          <p class="mt-1 text-slate-500">
+            This section will be activated once credentials are moved to workspace config. Calendar targets and event types below are still fully configurable.
+          </p>
+        </div>
+      </section>
+
+      <section v-else class="panel">
         <h3 class="section-title">Update Connection</h3>
         <p class="section-copy mt-1">Change your API key or label if needed.</p>
 
@@ -337,6 +352,7 @@ const API_BASE = '/api';
 
 const loading = ref(true);
 const connected = ref(false);
+const envConfigured = ref(false);
 const savedLabel = ref('');
 const saving = ref(false);
 const saveSuccess = ref('');
@@ -447,6 +463,52 @@ async function fetchCalendly() {
     integrationId = calendly.id;
     savedLabel.value = calendly.name || 'Calendly';
     form.value.label = calendly.name || 'My Calendly';
+  }
+}
+
+async function fetchEnvStatus() {
+  if (!workspaceId) return;
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  try {
+    const res = await fetch(`${API_BASE}/api-integrations-env-status?${params}`);
+    if (!res.ok) return;
+    const status = await res.json() as { calendly?: { configured?: boolean } };
+    if (status.calendly?.configured) {
+      envConfigured.value = true;
+    }
+  } catch {
+    // Non-critical — fall back to DB-only state
+  }
+}
+
+async function autoProvisionFromEnv() {
+  // Env credential exists but no DB integration row yet. Create one so the
+  // rest of the calendar UI (event types, calendar targets, eligibility rules)
+  // can bind to it. The api_key_ref points at the env var; no secret stored.
+  if (!workspaceId) return;
+  try {
+    const res = await fetch(`${API_BASE}/api-integrations-upsert`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        type: 'calendar',
+        provider: 'calendly',
+        name: 'Calendly',
+        config_json: {
+          api_key_ref: 'CALENDLY_API_KEY',
+          configured: true,
+        },
+      }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    connected.value = true;
+    integrationId = data.id;
+    savedLabel.value = data.name || 'Calendly';
+    form.value.label = data.name || 'Calendly';
+  } catch {
+    // Non-critical — user can still configure manually if they want
   }
 }
 
@@ -647,7 +709,15 @@ onMounted(async () => {
     loading.value = false;
     return;
   }
-  await fetchCalendly();
+  await Promise.all([fetchCalendly(), fetchEnvStatus()]);
+
+  // If credentials live in env vars but the workspace doesn't have a Calendly
+  // integration row yet, auto-create one so calendar targets / event types
+  // can be configured without forcing the user to paste a key that's already set.
+  if (envConfigured.value && !connected.value) {
+    await autoProvisionFromEnv();
+  }
+
   if (connected.value) {
     await fetchCalendars();
   }

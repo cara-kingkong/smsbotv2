@@ -9,7 +9,7 @@
         v-for="card in providerCards"
         :key="card.provider"
         class="panel flex h-full flex-col"
-        :class="card.provider === 'twilio' && card.envConfigured ? 'opacity-75' : ''"
+        :class="card.envConfigured ? 'opacity-75' : ''"
       >
         <div class="flex items-start justify-between gap-3">
           <div>
@@ -18,7 +18,7 @@
             <p class="section-copy mt-2">{{ card.description }}</p>
           </div>
           <span
-            v-if="card.provider === 'twilio' && card.envConfigured"
+            v-if="card.envConfigured"
             class="badge bg-slate-100 text-slate-600"
           >
             Env-managed
@@ -38,11 +38,18 @@
 
         <div v-if="!card.expanded" class="mt-5 flex-1">
           <div class="note-box">
-            <template v-if="card.provider === 'twilio' && card.envConfigured">
-              <p class="font-medium text-slate-700">Twilio config is set in env vars.</p>
-              <p class="mt-1 text-slate-500">This section will be activated once Twilio vars are moved to workspace config.</p>
+            <template v-if="card.envConfigured">
+              <p class="font-medium text-slate-700">{{ card.name }} credentials are set in env vars.</p>
+              <p class="mt-1 text-slate-500">This section will be activated once credentials are moved to workspace config.</p>
+              <a
+                v-if="card.configPath"
+                :href="card.configPath"
+                class="mt-3 inline-flex items-center text-sm font-medium text-teal-600 hover:text-teal-700"
+              >
+                {{ card.configLabel ?? 'Open settings' }} &rarr;
+              </a>
             </template>
-            <template v-else-if="card.provider === 'twilio' && !card.envConfigured && !card.connected">
+            <template v-else-if="card.provider === 'twilio' && !card.connected">
               Twilio credentials must be set as environment variables on the server (<span class="font-mono text-xs">TWILIO_ACCOUNT_SID</span>, <span class="font-mono text-xs">TWILIO_AUTH_TOKEN</span>). Outbound numbers are configured per-workspace in the Phone Numbers section.
             </template>
             <template v-else-if="card.connected">
@@ -139,7 +146,7 @@
           </div>
         </div>
 
-        <div v-if="!card.expanded && !(card.provider === 'twilio' && card.envConfigured)" class="mt-6 flex flex-wrap gap-2">
+        <div v-if="!card.expanded && !card.envConfigured" class="mt-6 flex flex-wrap gap-2">
           <button class="button-secondary flex-1" @click="openConfig(card)">Configure</button>
           <button class="button-ghost" :class="!card.connected ? 'cursor-not-allowed opacity-50' : ''" :disabled="!card.connected" @click="validateConfig(card)">
             Validate config
@@ -178,12 +185,23 @@ interface ProviderCard {
   validationMessage: string;
   form: Record<string, string>;
   envConfigured?: boolean;
+  // Optional deep link to a dedicated config page (e.g. calendar targets,
+  // phone numbers). Surfaced when the credential is env-managed so the user
+  // still has a way to do workspace-level setup.
+  configPath?: string;
+  configLabel?: string;
 }
 
-interface TwilioEnvStatus {
-  account_sid: boolean;
-  auth_token: boolean;
+interface ProviderEnvStatus {
   configured: boolean;
+}
+
+interface EnvStatusResponse {
+  twilio: ProviderEnvStatus & { account_sid: boolean; auth_token: boolean };
+  openai: ProviderEnvStatus;
+  anthropic: ProviderEnvStatus;
+  calendly: ProviderEnvStatus;
+  keap: ProviderEnvStatus;
 }
 
 const loading = ref(true);
@@ -254,6 +272,8 @@ const providerCards = reactive<ProviderCard[]>([
     saveError: '',
     validationMessage: '',
     form: { label: '', api_key: '' },
+    configPath: '/calendar',
+    configLabel: 'Manage calendar targets',
   },
   {
     provider: 'keap',
@@ -284,12 +304,14 @@ async function fetchEnvStatus() {
   try {
     const res = await fetch(`${API_BASE}/api-integrations-env-status?${params}`);
     if (!res.ok) return;
-    const status: { twilio: TwilioEnvStatus } = await res.json();
+    const status = await res.json() as Partial<EnvStatusResponse>;
 
-    const twilioCard = providerCards.find((c) => c.provider === 'twilio');
-    if (twilioCard && status.twilio?.configured) {
-      twilioCard.envConfigured = true;
-      twilioCard.connected = true;
+    for (const card of providerCards) {
+      const providerStatus = status[card.provider as keyof EnvStatusResponse];
+      if (providerStatus?.configured) {
+        card.envConfigured = true;
+        card.connected = true;
+      }
     }
   } catch {
     // Non-critical — fall back to DB-only state

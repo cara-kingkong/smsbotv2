@@ -24,6 +24,18 @@ export default async (req: Request, _context: Context) => {
         auth_token: !!process.env.TWILIO_AUTH_TOKEN,
         configured: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
       },
+      openai: {
+        configured: !!process.env.OPENAI_API_KEY,
+      },
+      anthropic: {
+        configured: !!process.env.ANTHROPIC_API_KEY,
+      },
+      calendly: {
+        configured: !!process.env.CALENDLY_API_KEY,
+      },
+      keap: {
+        configured: !!process.env.KEAP_API_KEY,
+      },
     };
 
     return new Response(JSON.stringify(status), {
