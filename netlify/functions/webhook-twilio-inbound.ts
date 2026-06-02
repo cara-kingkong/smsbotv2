@@ -7,6 +7,7 @@ import { QueueService } from '../../src/lib/queues/service';
 import { ConversationOutcome, ConversationStatus, CRMEventType } from '../../src/lib/types';
 import { ConversationService } from '../../src/lib/conversations/service';
 import { CRMService } from '../../src/lib/crm/service';
+import { buildConversationNote } from '../../src/lib/crm/notes';
 
 /**
  * Twilio inbound SMS webhook.
@@ -134,7 +135,7 @@ export default async (req: Request, _context: Context) => {
     // Find active conversation for this lead
     const { data: activeConversation } = await db
       .from('conversations')
-      .select('id, status, human_controlled, agent_version_id')
+      .select('id, status, human_controlled, agent_version_id, campaign_id')
       .eq('lead_id', lead.id)
       .is('deleted_at', null)
       .in('status', [
@@ -166,7 +167,7 @@ export default async (req: Request, _context: Context) => {
 
       const { data: previousConversation } = await db
         .from('conversations')
-        .select('id, status, human_controlled, agent_version_id')
+        .select('id, status, human_controlled, agent_version_id, campaign_id')
         .eq('lead_id', lead.id)
         .neq('status', ConversationStatus.OptedOut)
         .is('deleted_at', null)
@@ -214,6 +215,20 @@ export default async (req: Request, _context: Context) => {
           .single();
 
         if (crmIntegration) {
+          // Per-campaign tag mapping + name for the note subheading.
+          const { data: campaignRow } = await db
+            .from('campaigns')
+            .select('name, crm_tag_mappings_json')
+            .eq('id', conversation.campaign_id)
+            .maybeSingle();
+          const tagMappings = (campaignRow?.crm_tag_mappings_json ?? {}) as Record<string, string>;
+          const mappedTag = (tagMappings[CRMEventType.ConversationOptedOut] ?? '').toString().trim();
+
+          const noteBody = await buildConversationNote(db, conversation.id, {
+            headline: 'Lead OPTED OUT of SMS chatbot',
+            subheading: campaignRow?.name ? `Campaign: ${campaignRow.name}` : undefined,
+          });
+
           const crmService = new CRMService(db, new Map());
           const crmEvent = await crmService.emitEvent({
             workspace_id: lead.workspace_id,
@@ -223,8 +238,8 @@ export default async (req: Request, _context: Context) => {
             external_contact_id: lead.external_contact_id,
             payload: {
               external_contact_id: lead.external_contact_id,
-              tag_name: 'opted_out',
-              note_body: 'Lead opted out of SMS chatbot',
+              tag_name: mappedTag || null,
+              note_body: noteBody,
             },
           });
 

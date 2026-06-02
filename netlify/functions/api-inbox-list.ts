@@ -46,6 +46,8 @@ export default async (req: Request, _context: Context) => {
       );
     }
 
+    const includeTest = url.searchParams.get('include_test') === 'true';
+
     let query = db
       .from('conversations')
       .select(`
@@ -57,6 +59,10 @@ export default async (req: Request, _context: Context) => {
       .is('deleted_at', null)
       .order('last_activity_at', { ascending: false })
       .range(offset, offset + limit - 1);
+
+    if (!includeTest) {
+      query = query.eq('is_test', false);
+    }
 
     if (statusFilter) {
       query = query.eq('status', statusFilter);

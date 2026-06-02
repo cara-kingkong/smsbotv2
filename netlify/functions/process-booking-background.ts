@@ -13,6 +13,7 @@ import {
   SenderType,
 } from '../../src/lib/types';
 import { CRMService } from '../../src/lib/crm/service';
+import { buildConversationNote } from '../../src/lib/crm/notes';
 import { AuditService } from '../../src/lib/audit/service';
 import { runQueueJob } from '../../src/lib/queues/job-runner';
 
@@ -283,6 +284,20 @@ export default async (req: Request, _context: Context) =>
       .single();
 
     if (crmIntegration && lead.external_contact_id) {
+      // Per-campaign tag mapping + name for the note subheading.
+      const { data: campaignRow } = await db
+        .from('campaigns')
+        .select('name, crm_tag_mappings_json')
+        .eq('id', conversation.campaign_id)
+        .maybeSingle();
+      const tagMappings = (campaignRow?.crm_tag_mappings_json ?? {}) as Record<string, string>;
+      const mappedTag = (tagMappings[CRMEventType.ConversationBooked] ?? '').toString().trim();
+
+      const noteBody = await buildConversationNote(db, conversation_id, {
+        headline: 'Lead BOOKED a meeting via SMS chatbot',
+        subheading: campaignRow?.name ? `Campaign: ${campaignRow.name}` : undefined,
+      });
+
       const crmService = new CRMService(db, new Map());
       const crmEvent = await crmService.emitEvent({
         workspace_id: conversation.workspace_id,
@@ -292,8 +307,8 @@ export default async (req: Request, _context: Context) =>
         external_contact_id: lead.external_contact_id,
         payload: {
           external_contact_id: lead.external_contact_id,
-          tag_name: 'booked',
-          note_body: 'Lead booked via SMS chatbot',
+          tag_name: mappedTag || null,
+          note_body: noteBody,
         },
       });
 

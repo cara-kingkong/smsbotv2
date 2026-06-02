@@ -61,10 +61,25 @@ export default async (req: Request, _context: Context) => {
     const match = existing.find((i) => i.provider === provider);
 
     if (match) {
-      // Update existing integration
+      // Merge config: keep existing secret fields when the incoming payload
+      // omits them. Lets the client re-save the form without retyping the
+      // saved api_key / auth_token.
+      const SECRET_FIELDS = ['api_key', 'auth_token', 'account_sid'];
+      const existingConfig = (match.config_json ?? {}) as Record<string, unknown>;
+      const incomingConfig = (config_json ?? {}) as Record<string, unknown>;
+      const mergedConfig: Record<string, unknown> = { ...existingConfig, ...incomingConfig };
+
+      for (const field of SECRET_FIELDS) {
+        const incoming = incomingConfig[field];
+        const hasIncoming = typeof incoming === 'string' && incoming.length > 0;
+        if (!hasIncoming && existingConfig[field]) {
+          mergedConfig[field] = existingConfig[field];
+        }
+      }
+
       const updated = await service.update(match.id, {
         name,
-        config_json: config_json ?? {},
+        config_json: mergedConfig,
       });
 
       return new Response(JSON.stringify(updated), {

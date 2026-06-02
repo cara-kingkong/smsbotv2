@@ -90,6 +90,10 @@ export interface StopConditions {
   max_no_reply_hours: number;
 }
 
+/** Maps CRM event types → provider-specific tag IDs (e.g. Keap numeric IDs).
+ *  Missing/blank keys mean "skip the tag apply" for that event. */
+export type CRMTagMappings = Partial<Record<CRMEventType, string>>;
+
 export interface Campaign {
   id: string;
   workspace_id: string;
@@ -97,6 +101,7 @@ export interface Campaign {
   status: EntityStatus;
   business_hours_json: BusinessHours;
   stop_conditions_json: StopConditions;
+  crm_tag_mappings_json: CRMTagMappings;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
@@ -208,6 +213,7 @@ export interface Lead {
   timezone: string | null;
   status: EntityStatus;
   opted_out: boolean;
+  is_test: boolean;
   source_json: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -226,6 +232,7 @@ export interface Conversation {
   outcome: ConversationOutcome | null;
   needs_human: boolean;
   human_controlled: boolean;
+  is_test: boolean;
   opened_at: string;
   last_activity_at: string;
   paused_until: string | null;

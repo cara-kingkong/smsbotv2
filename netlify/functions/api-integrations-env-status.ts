@@ -33,9 +33,8 @@ export default async (req: Request, _context: Context) => {
       calendly: {
         configured: !!process.env.CALENDLY_API_KEY,
       },
-      keap: {
-        configured: !!process.env.KEAP_API_KEY,
-      },
+      // Keap credentials live on the integration row (workspace settings),
+      // not in env vars — so this endpoint no longer reports a Keap status.
     };
 
     return new Response(JSON.stringify(status), {

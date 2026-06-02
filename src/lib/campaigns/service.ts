@@ -53,7 +53,7 @@ export class CampaignService {
     return data ?? [];
   }
 
-  async update(id: string, updates: Partial<Pick<Campaign, 'name' | 'status' | 'business_hours_json' | 'stop_conditions_json'>>): Promise<Campaign> {
+  async update(id: string, updates: Partial<Pick<Campaign, 'name' | 'status' | 'business_hours_json' | 'stop_conditions_json' | 'crm_tag_mappings_json'>>): Promise<Campaign> {
     const { data, error } = await this.db
       .from('campaigns')
       .update(updates)

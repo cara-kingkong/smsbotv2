@@ -20,6 +20,7 @@ import {
   ConversationEventType,
 } from '../../src/lib/types';
 import { CRMService } from '../../src/lib/crm/service';
+import { buildConversationNote } from '../../src/lib/crm/notes';
 import type { AIProviderAdapter, Calendar } from '../../src/lib/types';
 import { CalendlyAdapter } from '../../src/lib/calendar/adapters/calendly';
 import { isWithinBusinessHours, getNextBusinessHoursStart } from '../../src/lib/utils/business-hours';
@@ -107,25 +108,34 @@ export default async (req: Request, _context: Context) =>
     // Resolve the outbound "from" number for this lead. MUST match the
     // lead's country — we never send into a country the workspace hasn't
     // configured. No cross-country fallback, no env-var backdoor.
-    const resolvedNumber = await phoneNumbers.resolveForLead(conversation.workspace_id, lead.phone_e164);
-    if (!resolvedNumber) {
-      const leadCountry = parsePhoneNumberFromString(lead.phone_e164)?.country ?? null;
-      console.warn(
-        `Send blocked for conversation ${conversation_id}: no workspace number in country ${leadCountry ?? 'unknown'}`,
-      );
-      await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
-      await db.from('conversation_events').insert({
-        conversation_id,
-        event_type: 'send_blocked_no_number_for_country',
-        event_payload_json: {
-          workspace_id: conversation.workspace_id,
-          lead_phone: lead.phone_e164,
-          lead_country: leadCountry,
-        },
-      });
-      return new Response('No outbound number for lead country', { status: 200 });
+    //
+    // Debug conversations skip this guard: they never hit Twilio so the
+    // synthetic lead phone doesn't need a workspace number behind it.
+    const isTestConversation = (conversation as { is_test?: boolean }).is_test === true;
+    let fromNumber: string;
+    if (isTestConversation) {
+      fromNumber = 'debug';
+    } else {
+      const resolvedNumber = await phoneNumbers.resolveForLead(conversation.workspace_id, lead.phone_e164);
+      if (!resolvedNumber) {
+        const leadCountry = parsePhoneNumberFromString(lead.phone_e164)?.country ?? null;
+        console.warn(
+          `Send blocked for conversation ${conversation_id}: no workspace number in country ${leadCountry ?? 'unknown'}`,
+        );
+        await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
+        await db.from('conversation_events').insert({
+          conversation_id,
+          event_type: 'send_blocked_no_number_for_country',
+          event_payload_json: {
+            workspace_id: conversation.workspace_id,
+            lead_phone: lead.phone_e164,
+            lead_country: leadCountry,
+          },
+        });
+        return new Response('No outbound number for lead country', { status: 200 });
+      }
+      fromNumber = resolvedNumber.e164;
     }
-    const fromNumber = resolvedNumber.e164;
 
     const hasCampaignStopConditions = campaign.stop_conditions_json?.max_messages !== undefined
       && Object.keys(campaign.stop_conditions_json).length > 0;
@@ -173,7 +183,7 @@ export default async (req: Request, _context: Context) =>
     }
 
     const hasBusinessHours = effectiveBusinessHours?.schedule?.length > 0;
-    if (hasBusinessHours && !isWithinBusinessHours(effectiveBusinessHours, lead.timezone)) {
+    if (!isTestConversation && hasBusinessHours && !isWithinBusinessHours(effectiveBusinessHours, lead.timezone)) {
       const nextOpen = getNextBusinessHoursStart(effectiveBusinessHours, lead.timezone);
       if (nextOpen) {
         await queueService.enqueue({
@@ -440,7 +450,7 @@ export default async (req: Request, _context: Context) =>
       await conversationService.updateStatus(conversation_id, ConversationStatus.WaitingForLead);
 
       const cadence = version.reply_cadence_json;
-      if (cadence && cadence.max_followups > 0 && cadence.followup_delay_seconds > 0) {
+      if (!isTestConversation && cadence && cadence.max_followups > 0 && cadence.followup_delay_seconds > 0) {
         const { count: followupCount } = await db
           .from('conversation_events')
           .select('*', { count: 'exact', head: true })
@@ -636,11 +646,21 @@ export default async (req: Request, _context: Context) =>
 
       if (crmIntegration) {
         const crmService = new CRMService(db, new Map());
-        const noteMap: Record<string, string> = {
-          [CRMEventType.ConversationQualified]: 'Lead qualified via SMS chatbot',
-          [CRMEventType.ConversationUnqualified]: 'Lead unqualified via SMS chatbot',
-          [CRMEventType.ConversationNeedsHuman]: 'Lead escalated to human via SMS chatbot',
+        const headlineMap: Record<string, string> = {
+          [CRMEventType.ConversationQualified]: 'Lead QUALIFIED via SMS chatbot',
+          [CRMEventType.ConversationUnqualified]: 'Lead UNQUALIFIED via SMS chatbot',
+          [CRMEventType.ConversationNeedsHuman]: 'Lead escalated to HUMAN via SMS chatbot',
         };
+
+        // Per-campaign tag mapping. Empty/missing entry means "skip tag apply",
+        // but the note still goes out.
+        const tagMappings = (campaign.crm_tag_mappings_json ?? {}) as Record<string, string>;
+        const mappedTag = (tagMappings[crmEventType] ?? '').toString().trim();
+
+        const noteBody = await buildConversationNote(db, conversation_id, {
+          headline: headlineMap[crmEventType],
+          subheading: `Campaign: ${campaign.name}`,
+        });
 
         const crmEvent = await crmService.emitEvent({
           workspace_id: conversation.workspace_id,
@@ -650,8 +670,8 @@ export default async (req: Request, _context: Context) =>
           external_contact_id: lead.external_contact_id,
           payload: {
             external_contact_id: lead.external_contact_id,
-            tag_name: crmEventType.replace('conversation_', ''),
-            note_body: noteMap[crmEventType],
+            tag_name: mappedTag || null,
+            note_body: noteBody,
           },
         });
 

@@ -20,7 +20,7 @@ export default async (req: Request, _context: Context) => {
 
   try {
     const body = await req.json();
-    const { campaign_id, name, status, business_hours_json, stop_conditions_json } = body;
+    const { campaign_id, name, status, business_hours_json, stop_conditions_json, crm_tag_mappings_json } = body;
 
     if (!campaign_id) {
       return new Response(
@@ -35,6 +35,7 @@ export default async (req: Request, _context: Context) => {
     if (status !== undefined) updates.status = status;
     if (business_hours_json !== undefined) updates.business_hours_json = business_hours_json;
     if (stop_conditions_json !== undefined) updates.stop_conditions_json = stop_conditions_json;
+    if (crm_tag_mappings_json !== undefined) updates.crm_tag_mappings_json = crm_tag_mappings_json;
 
     if (Object.keys(updates).length === 0) {
       return new Response(

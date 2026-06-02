@@ -90,9 +90,15 @@
                 </select>
 
                 <span class="page-badge">Weight {{ editForm.weight }}</span>
-                <span class="page-badge">
-                  {{ activeVersion ? `Active v${activeVersion.version_number}` : 'No active prompt' }}
-                </span>
+                <span
+                  v-if="activeVersion"
+                  class="badge bg-emerald-50 text-emerald-700"
+                >Active v{{ activeVersion.version_number }}</span>
+                <span
+                  v-else
+                  class="badge bg-amber-50 text-amber-700"
+                  title="Add a prompt and save to publish a version. Until then this agent won't take conversations."
+                >No prompt — not deployable</span>
               </div>
             </div>
           </div>

@@ -62,7 +62,7 @@
         </div>
 
         <div v-if="card.expanded" class="mt-5 space-y-4">
-          <div>
+          <div v-if="card.provider !== 'keap'">
             <label class="form-label">Label</label>
             <input
               v-model="card.form.label"
@@ -126,8 +126,21 @@
 
           <template v-else-if="card.provider === 'keap'">
             <div>
-              <label class="form-label">API Key</label>
-              <input v-model="card.form.api_key" type="password" placeholder="Your Keap API key" class="input" />
+              <label class="form-label">Personal Access Token</label>
+              <input
+                v-model="card.form.api_key"
+                type="password"
+                :placeholder="card.hasApiKey ? 'Token on file — leave blank to keep' : 'Paste your Keap PAT'"
+                class="input"
+              />
+              <p class="mt-1.5 text-xs text-slate-500">
+                Generate a Personal Access Token in your Keap developer account. PATs are
+                time-limited; if CRM sync stops working, generate a new one and paste it
+                here. Service Account Keys aren't supported.
+              </p>
+              <p v-if="card.hasApiKey" class="mt-1.5 text-xs text-slate-500">
+                A token is currently saved. Type a new one to replace it; leave blank to keep the existing token.
+              </p>
             </div>
           </template>
 
@@ -185,6 +198,9 @@ interface ProviderCard {
   validationMessage: string;
   form: Record<string, string>;
   envConfigured?: boolean;
+  /** Server signals an api_key is on file; the field is left blank on the
+   *  client so the secret never round-trips to the browser. */
+  hasApiKey?: boolean;
   // Optional deep link to a dedicated config page (e.g. calendar targets,
   // phone numbers). Surfaced when the credential is env-managed so the user
   // still has a way to do workspace-level setup.
@@ -201,7 +217,7 @@ interface EnvStatusResponse {
   openai: ProviderEnvStatus;
   anthropic: ProviderEnvStatus;
   calendly: ProviderEnvStatus;
-  keap: ProviderEnvStatus;
+  // Keap is workspace-configured, not env-managed.
 }
 
 const loading = ref(true);
@@ -333,9 +349,14 @@ async function fetchIntegrations() {
       card.savedName = integration.name;
       card.existingId = integration.id;
 
-      const config = integration.config_json ?? {};
+      const config = (integration.config_json ?? {}) as Record<string, unknown>;
       card.form.label = integration.name;
+      // The server redacts secret fields (e.g. api_key, auth_token) and sends
+      // boolean flags instead. Pull those into UI state; never put the secret
+      // itself into a form input.
+      card.hasApiKey = config.has_api_key === true;
       for (const key of Object.keys(config)) {
+        if (key === 'api_key' || key === 'auth_token' || key === 'account_sid') continue;
         if (key in card.form) {
           card.form[key] = config[key] as string;
         }
@@ -370,8 +391,12 @@ function buildConfigJson(card: ProviderCard): Record<string, unknown> {
     config.personal_access_token_ref = card.form.api_key ? 'CALENDLY_PERSONAL_ACCESS_TOKEN' : '';
     config.configured = !!card.form.api_key;
   } else if (card.provider === 'keap') {
-    config.api_key_ref = card.form.api_key ? 'KEAP_API_KEY' : '';
-    config.configured = !!card.form.api_key;
+    // Persist the api_key directly in the integration row so the workspace
+    // owns its own credentials. Blank input on a re-save means "keep what's
+    // already stored" — the upsert endpoint merges around the missing field.
+    const trimmedKey = card.form.api_key?.trim();
+    if (trimmedKey) config.api_key = trimmedKey;
+    config.configured = !!(trimmedKey || card.hasApiKey);
   }
 
   return config;

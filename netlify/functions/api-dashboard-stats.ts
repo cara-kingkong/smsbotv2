@@ -19,11 +19,12 @@ export default async (req: Request, _context: Context) => {
     const access = await requireWorkspaceAccess(req, workspaceId);
     if (access instanceof Response) return access;
 
-    // Fetch all non-deleted conversations for workspace
+    // Fetch all non-deleted conversations for workspace (excludes debug/test rows)
     const { data: conversations, error } = await db
       .from('conversations')
       .select('id, status, outcome')
       .eq('workspace_id', access.workspace.id)
+      .eq('is_test', false)
       .is('deleted_at', null);
 
     if (error) throw new Error(`Failed to fetch stats: ${error.message}`);

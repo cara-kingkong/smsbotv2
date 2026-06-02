@@ -37,7 +37,22 @@ export default async (req: Request, _context: Context) => {
       typeParam as IntegrationType | undefined,
     );
 
-    return new Response(JSON.stringify(integrations), {
+    // Redact secrets before sending to the client. Replace each with a
+    // `has_<field>` boolean so the UI can show "saved" state without ever
+    // round-tripping the credential to the browser.
+    const SECRET_FIELDS = ['api_key', 'auth_token', 'account_sid'];
+    const sanitized = integrations.map((integration) => {
+      const config = { ...(integration.config_json ?? {}) } as Record<string, unknown>;
+      for (const field of SECRET_FIELDS) {
+        if (typeof config[field] === 'string' && (config[field] as string).length > 0) {
+          config[`has_${field}`] = true;
+        }
+        delete config[field];
+      }
+      return { ...integration, config_json: config };
+    });
+
+    return new Response(JSON.stringify(sanitized), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });

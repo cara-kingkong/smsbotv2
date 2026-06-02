@@ -79,22 +79,44 @@ export class MessagingService {
     to: string;
     from: string;
   }): Promise<Message> {
-    const { data: message, error: fetchError } = await this.db
+    const { data: row, error: fetchError } = await this.db
       .from('messages')
-      .select('*')
+      .select('*, conversations:conversation_id(is_test)')
       .eq('id', input.message_id)
       .single();
 
-    if (fetchError || !message) {
+    if (fetchError || !row) {
       throw new Error(`Failed to load message ${input.message_id}: ${fetchError?.message ?? 'Not found'}`);
     }
 
-    if (message.direction !== MessageDirection.Outbound) {
+    const isTest = (row.conversations as { is_test?: boolean } | null)?.is_test === true;
+    const { conversations: _conv, ...message } = row as Record<string, unknown> & { conversations?: unknown };
+    const messageRecord = message as Message;
+
+    if (messageRecord.direction !== MessageDirection.Outbound) {
       throw new Error(`Message ${input.message_id} is not outbound`);
     }
 
-    if (message.provider_message_id) {
-      return message;
+    if (messageRecord.provider_message_id) {
+      return messageRecord;
+    }
+
+    // Debug conversations: persist the message but never hit Twilio.
+    if (isTest) {
+      const sentAt = new Date().toISOString();
+      await this.db
+        .from('messages')
+        .update({
+          provider_status: 'test_skipped',
+          sent_at: sentAt,
+        })
+        .eq('id', messageRecord.id);
+
+      return {
+        ...messageRecord,
+        provider_status: 'test_skipped',
+        sent_at: sentAt,
+      };
     }
 
     // Send via provider
@@ -102,8 +124,8 @@ export class MessagingService {
       const result = await this.smsAdapter.sendMessage({
         to: input.to,
         from: input.from,
-        body: message.body_text,
-        conversation_id: message.conversation_id,
+        body: messageRecord.body_text,
+        conversation_id: messageRecord.conversation_id,
       });
 
       // Update with provider response
@@ -114,10 +136,10 @@ export class MessagingService {
           provider_status: result.status,
           sent_at: new Date().toISOString(),
         })
-        .eq('id', message.id);
+        .eq('id', messageRecord.id);
 
       return {
-        ...message,
+        ...messageRecord,
         provider_message_id: result.provider_message_id,
         provider_status: result.status,
         sent_at: new Date().toISOString(),
@@ -130,7 +152,7 @@ export class MessagingService {
           provider_status: 'failed',
           error_json: { error: err instanceof Error ? err.message : 'Unknown error' },
         })
-        .eq('id', message.id);
+        .eq('id', messageRecord.id);
 
       throw err;
     }

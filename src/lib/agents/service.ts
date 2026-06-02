@@ -149,17 +149,41 @@ export class AgentService {
 
     if (error) throw new Error(`Failed to list workspace agents: ${error.message}`);
 
-    return (data ?? []).map((row: Record<string, unknown>) => {
+    const rows = data ?? [];
+
+    // Resolve the active prompt version per agent (one query) so the UI can
+    // distinguish a deployable agent from a draft with no published prompt.
+    const agentIds = rows.map((row: Record<string, unknown>) => row.id as string);
+    const versionByAgent = new Map<string, number>();
+    if (agentIds.length > 0) {
+      const { data: versions } = await this.db
+        .from('agent_versions')
+        .select('agent_id, version_number')
+        .in('agent_id', agentIds)
+        .eq('is_active', true);
+
+      for (const v of (versions ?? []) as { agent_id: string; version_number: number }[]) {
+        versionByAgent.set(v.agent_id, v.version_number);
+      }
+    }
+
+    return rows.map((row: Record<string, unknown>) => {
       const campaigns = row.campaigns as { name: string; workspace_id: string } | null;
       return {
         ...row,
         campaign_name: campaigns?.name ?? 'Unknown',
+        active_version_number: versionByAgent.get(row.id as string) ?? null,
         campaigns: undefined,
       };
-    }) as (Agent & { campaign_name?: string })[];
+    }) as (Agent & { campaign_name?: string; active_version_number?: number | null })[];
   }
 
-  /** Weighted random selection among active agents in a campaign */
+  /**
+   * Weighted random selection among *deployable* active agents in a campaign.
+   * An agent is only deployable if it has a published (active) prompt version —
+   * a promptless agent is skipped rather than throwing, so one half-built agent
+   * can't break routing for the whole campaign.
+   */
   async selectForConversation(campaignId: string): Promise<{ agent: Agent; version: AgentVersion }> {
     const query = this.db
       .from('agents')
@@ -173,11 +197,31 @@ export class AgentService {
     if (error) throw new Error(`Failed to list agents: ${error.message}`);
     if (!agents || agents.length === 0) throw new Error('No active agents for campaign');
 
-    // Weighted random pick
-    const totalWeight = agents.reduce((sum: number, a: Agent) => sum + a.weight, 0);
+    // Pull the active version for every candidate in one query, then keep only
+    // the agents that actually have one.
+    const { data: versions, error: versionsError } = await this.db
+      .from('agent_versions')
+      .select('*')
+      .in('agent_id', agents.map((a: Agent) => a.id))
+      .eq('is_active', true);
+
+    if (versionsError) throw new Error(`Failed to load agent versions: ${versionsError.message}`);
+
+    const versionByAgent = new Map<string, AgentVersion>();
+    for (const v of (versions ?? []) as AgentVersion[]) {
+      versionByAgent.set(v.agent_id, v);
+    }
+
+    const deployable = (agents as Agent[]).filter((a) => versionByAgent.has(a.id));
+    if (deployable.length === 0) {
+      throw new Error('No active agents with a published prompt version for campaign');
+    }
+
+    // Weighted random pick among deployable agents
+    const totalWeight = deployable.reduce((sum: number, a: Agent) => sum + a.weight, 0);
     let random = Math.random() * totalWeight;
-    let selected = agents[0];
-    for (const agent of agents) {
+    let selected = deployable[0];
+    for (const agent of deployable) {
       random -= agent.weight;
       if (random <= 0) {
         selected = agent;
@@ -185,7 +229,7 @@ export class AgentService {
       }
     }
 
-    const version = await this.getActiveVersion(selected.id);
+    const version = versionByAgent.get(selected.id);
     if (!version) throw new Error(`No active version for agent ${selected.id}`);
 
     return { agent: selected, version };
