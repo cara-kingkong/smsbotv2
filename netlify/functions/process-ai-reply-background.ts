@@ -11,6 +11,7 @@ import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
 import { PhoneNumberService } from '../../src/lib/messaging/phone-numbers';
 import { OpenAIAdapter } from '../../src/lib/ai/adapters/openai';
 import { AnthropicAdapter } from '../../src/lib/ai/adapters/anthropic';
+import { providerForModel } from '../../src/lib/ai/models';
 import {
   ConversationStatus,
   ConversationOutcome,
@@ -18,10 +19,11 @@ import {
   CRMEventType,
   MessageDirection,
   ConversationEventType,
+  QualificationState,
 } from '../../src/lib/types';
 import { CRMService } from '../../src/lib/crm/service';
 import { buildConversationNote } from '../../src/lib/crm/notes';
-import type { AIProviderAdapter, Calendar } from '../../src/lib/types';
+import type { AIProviderAdapter, AIDecision, Calendar } from '../../src/lib/types';
 import { CalendlyAdapter } from '../../src/lib/calendar/adapters/calendly';
 import { isWithinBusinessHours, getNextBusinessHoursStart } from '../../src/lib/utils/business-hours';
 import { evaluateStopConditions } from '../../src/lib/utils/stop-conditions';
@@ -209,10 +211,13 @@ export default async (req: Request, _context: Context) =>
     const bookingService = new BookingService(db, null as never);
     const calendars = await bookingService.getCalendarsForCampaign(conversation.campaign_id);
 
-    let providerKey = 'openai';
-    if (version.config_json && typeof version.config_json === 'object' && 'provider' in version.config_json) {
-      providerKey = version.config_json.provider as string;
-    }
+    // Resolve provider: prefer the one implied by the configured model, then the
+    // explicit provider key, then fall back to whichever adapter has credentials.
+    const config = (version.config_json ?? {}) as Record<string, unknown>;
+    const configuredModel = typeof config.model === 'string' && config.model ? config.model : '';
+    let providerKey = configuredModel
+      ? providerForModel(configuredModel)
+      : (typeof config.provider === 'string' ? config.provider : 'openai');
     if (!aiAdapters.has(providerKey)) {
       providerKey = aiAdapters.keys().next().value ?? 'openai';
     }
@@ -234,21 +239,68 @@ export default async (req: Request, _context: Context) =>
     const previouslyOfferedSlots = (priorSlotsEvent?.event_payload_json as Record<string, unknown>)?.slots as string[] | undefined;
 
     await heartbeat();
-    const decision = await aiService.generateReply({
-      agent_version: version,
-      conversation_history: history,
-      lead,
-      available_calendar_ids: calendars.map((c) => c.id),
-      available_calendars: calendars.map((c) => ({ id: c.id, name: c.name })),
-      available_slots: previouslyOfferedSlots,
-      provider_key: providerKey,
-    });
+
+    // ── First outbound message: use the agent's opening message ──
+    // When there's no history yet, this is the AI initiating the thread. If an
+    // opening message is configured, skip the full prompt + decision schema and
+    // send the (optionally cheaply-personalized) opener instead.
+    const openingTemplate = typeof config.opening_message === 'string' ? config.opening_message.trim() : '';
+    const openingModel = typeof config.opening_message_model === 'string' ? config.opening_message_model : 'static';
+    const useOpener = history.length === 0 && openingTemplate.length > 0;
+
+    let decision: AIDecision;
+    let modelName: string;
+
+    if (useOpener) {
+      // Derive a short outreach-context hint from the lead's source metadata so
+      // prompt-style openers can pick the right conditional variant. Prefers an
+      // explicit context/scenario/reason key, else falls back to the raw payload.
+      const sourceMeta = (lead.source_json ?? {}) as Record<string, unknown>;
+      const explicitContext = ['context', 'scenario', 'reason', 'source']
+        .map((k) => sourceMeta[k])
+        .find((v): v is string => typeof v === 'string' && v.length > 0);
+      const openingContext = explicitContext
+        ?? (Object.keys(sourceMeta).length > 0 ? JSON.stringify(sourceMeta).slice(0, 500) : undefined);
+
+      const openingText = await aiService.generateOpeningMessage({
+        template: openingTemplate,
+        lead,
+        model: openingModel,
+        context: openingContext,
+      });
+      decision = {
+        should_reply: true,
+        reply_text: openingText,
+        qualification_state: QualificationState.Unknown,
+        should_offer_times: false,
+        should_book: false,
+        should_cancel_booking: false,
+        confirmed_time: null,
+        recommended_calendar_id: null,
+        escalate_to_human: false,
+        tags_to_emit: [],
+        confidence_notes: ['Opening message'],
+        reason_summary: 'Initial outbound opener',
+      };
+      modelName = openingModel === 'static' || !openingModel ? 'opening:static' : openingModel;
+    } else {
+      decision = await aiService.generateReply({
+        agent_version: version,
+        conversation_history: history,
+        lead,
+        available_calendar_ids: calendars.map((c) => c.id),
+        available_calendars: calendars.map((c) => ({ id: c.id, name: c.name })),
+        available_slots: previouslyOfferedSlots,
+        provider_key: providerKey,
+      });
+      modelName = configuredModel || (providerKey === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o');
+    }
 
     await db.from('ai_decisions').insert({
       workspace_id: conversation.workspace_id,
       conversation_id,
       agent_version_id: version.id,
-      model_name: providerKey === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o',
+      model_name: modelName,
       input_json: {
         history_length: history.length,
         lead_timezone: lead.timezone,

@@ -1,6 +1,18 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { AIProviderAdapter, AIPromptContext, AIDecision } from '@lib/types';
+import type { AIProviderAdapter, AIPromptContext, AIDecision, OpeningMessageContext } from '@lib/types';
 import { QualificationState } from '@lib/types';
+
+const DEFAULT_OPENING_MODEL = 'claude-haiku-4-5-20251001';
+
+const OPENING_SYSTEM_PROMPT = `You are writing the FIRST outbound SMS to a new lead. Below are the opening-message instructions. They may be a single message OR prompt-style guidance with conditional variants (e.g. one version when a first name is known and another when it isn't, or different versions depending on the reason for reaching out).
+
+Your job:
+- Choose the SINGLE most appropriate variant for this lead, using the first name and context provided.
+- If a first name is given, address them by it; if not, use the no-name variant (never write a literal placeholder like "[Name]").
+- Match the variant to the context when the instructions branch on it; if no context fits, use the most general/default variant.
+- Keep it natural, warm and SMS-friendly. Preserve the sender's wording and tone — do not invent new offers, links, or emojis that the instructions don't include.
+
+Reply with ONLY the final SMS text — no options, no quotes, no explanation.`;
 
 const DECISION_SCHEMA = `
 You must respond with ONLY valid JSON matching this schema (no other text):
@@ -114,8 +126,9 @@ export class AnthropicAdapter implements AIProviderAdapter {
     }
 
     const response = await this.client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: context.model || 'claude-sonnet-4-20250514',
       max_tokens: 1000,
+      ...(context.temperature !== undefined ? { temperature: context.temperature } : {}),
       system: systemPrompt,
       messages,
     });
@@ -140,6 +153,29 @@ export class AnthropicAdapter implements AIProviderAdapter {
         reason_summary: 'Structured output parse failure — escalating',
       };
     }
+  }
+
+  async generateOpening(context: OpeningMessageContext): Promise<string> {
+    const response = await this.client.messages.create({
+      model: context.model || DEFAULT_OPENING_MODEL,
+      max_tokens: 200,
+      system: OPENING_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            context.first_name ? `Lead's first name: ${context.first_name}` : 'Lead has no first name on file.',
+            `Context for outreach: ${context.context || 'none provided'}`,
+            '',
+            'Opening message instructions:',
+            context.message,
+          ].join('\n'),
+        },
+      ],
+    });
+
+    const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '';
+    return text || context.message;
   }
 }
 

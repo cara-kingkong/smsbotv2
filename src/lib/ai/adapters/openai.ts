@@ -1,6 +1,18 @@
 import OpenAI from 'openai';
-import type { AIProviderAdapter, AIPromptContext, AIDecision } from '@lib/types';
+import type { AIProviderAdapter, AIPromptContext, AIDecision, OpeningMessageContext } from '@lib/types';
 import { QualificationState } from '@lib/types';
+
+const DEFAULT_OPENING_MODEL = 'gpt-4o-mini';
+
+const OPENING_SYSTEM_PROMPT = `You are writing the FIRST outbound SMS to a new lead. Below are the opening-message instructions. They may be a single message OR prompt-style guidance with conditional variants (e.g. one version when a first name is known and another when it isn't, or different versions depending on the reason for reaching out).
+
+Your job:
+- Choose the SINGLE most appropriate variant for this lead, using the first name and context provided.
+- If a first name is given, address them by it; if not, use the no-name variant (never write a literal placeholder like "[Name]").
+- Match the variant to the context when the instructions branch on it; if no context fits, use the most general/default variant.
+- Keep it natural, warm and SMS-friendly. Preserve the sender's wording and tone — do not invent new offers, links, or emojis that the instructions don't include.
+
+Reply with ONLY the final SMS text — no options, no quotes, no explanation.`;
 
 const DECISION_SCHEMA = `
 You must respond with valid JSON matching this schema:
@@ -115,10 +127,10 @@ export class OpenAIAdapter implements AIProviderAdapter {
     }
 
     const completion = await this.client.chat.completions.create({
-      model: 'gpt-4o',
+      model: context.model || 'gpt-4o',
       messages,
       response_format: { type: 'json_object' },
-      temperature: 0.7,
+      temperature: context.temperature ?? 0.7,
       max_tokens: 1000,
     });
 
@@ -143,6 +155,30 @@ export class OpenAIAdapter implements AIProviderAdapter {
         reason_summary: 'Structured output parse failure — escalating',
       };
     }
+  }
+
+  async generateOpening(context: OpeningMessageContext): Promise<string> {
+    const completion = await this.client.chat.completions.create({
+      model: context.model || DEFAULT_OPENING_MODEL,
+      messages: [
+        { role: 'system', content: OPENING_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: [
+            context.first_name ? `Lead's first name: ${context.first_name}` : 'Lead has no first name on file.',
+            `Context for outreach: ${context.context || 'none provided'}`,
+            '',
+            'Opening message instructions:',
+            context.message,
+          ].join('\n'),
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 200,
+    });
+
+    const text = completion.choices[0]?.message?.content?.trim() ?? '';
+    return text || context.message;
   }
 }
 

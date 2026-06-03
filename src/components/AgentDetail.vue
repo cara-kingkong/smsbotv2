@@ -152,6 +152,33 @@
               <p class="form-help">The main guidance prompt sent to the AI for each conversation turn.</p>
             </div>
 
+            <div class="panel-muted space-y-4">
+              <div>
+                <label class="form-label">Opening Message</label>
+                <textarea
+                  v-model="versionForm.opening_message"
+                  rows="3"
+                  placeholder="Hey {{first_name}}, thanks for reaching out! Got a quick sec to chat?"
+                  class="input text-sm"
+                ></textarea>
+                <p class="form-help">
+                  Sent as the very first outbound SMS. With <strong>Static</strong>, write the exact message and use
+                  <code v-pre>{{first_name}}</code> / <code v-pre>{{last_name}}</code> as merge fields.
+                  With a model selected, you can instead write prompt-style instructions with conditional variants
+                  (e.g. different versions for known vs unknown name, or per outreach context) and the AI picks the right one.
+                  Leave blank to let the main AI write the first message.
+                </p>
+              </div>
+              <div class="sm:max-w-xs">
+                <label class="form-label">Opening Message Model</label>
+                <select v-model="versionForm.opening_message_model" class="select">
+                  <option value="static">Static — merge fields only (no AI)</option>
+                  <option v-for="m in availableOpeningModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+                </select>
+                <p class="form-help">Static sends the template verbatim (free). A cheap model lightly personalizes it — no full prompt or context.</p>
+              </div>
+            </div>
+
             <div class="grid gap-4 lg:grid-cols-2">
               <fieldset class="panel-muted space-y-4">
                 <legend class="form-label">System Rules</legend>
@@ -216,11 +243,11 @@
                     <label class="form-label">Model</label>
                     <select v-model="versionForm.model" class="select">
                       <option value="">Default</option>
-                      <option value="gpt-4o-mini">GPT-4o Mini</option>
-                      <option value="gpt-4o">GPT-4o</option>
-                      <option value="claude-sonnet-4-20250514">Claude Sonnet</option>
-                      <option value="claude-haiku-4-5-20251001">Claude Haiku</option>
+                      <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.label }}</option>
                     </select>
+                    <p v-if="availableProviders && availableModels.length === 0" class="form-help">
+                      No AI providers are configured. Add an OpenAI or Anthropic API key in workspace settings.
+                    </p>
                   </div>
                   <div>
                     <label class="form-label">Temperature</label>
@@ -360,6 +387,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { getSessionContext } from '@lib/config/public-client';
+import { AI_MODELS, providerForModel, type AIProviderKey } from '@lib/ai/models';
 
 const props = defineProps<{ agentId: string }>();
 
@@ -394,6 +422,8 @@ interface VersionRecord {
 
 interface PromptFields {
   prompt_text: string;
+  opening_message: string;
+  opening_message_model: string;
   tone: string;
   max_message_length: number;
   reply_delay_seconds: number;
@@ -409,6 +439,8 @@ interface PromptFields {
 
 const DEFAULT_PROMPT_FIELDS: PromptFields = {
   prompt_text: '',
+  opening_message: '',
+  opening_message_model: 'static',
   tone: 'friendly',
   max_message_length: 160,
   reply_delay_seconds: 30,
@@ -472,6 +504,51 @@ const weightPercent = computed(() => {
 });
 const activeVersion = computed(() => versions.value.find((ver) => ver.is_active) ?? null);
 
+// Which AI providers have credentials configured on the server. null = unknown
+// (status not loaded yet / failed) → show all models rather than an empty list.
+const availableProviders = ref<Set<AIProviderKey> | null>(null);
+
+function providerAvailable(provider: AIProviderKey): boolean {
+  return availableProviders.value === null || availableProviders.value.has(provider);
+}
+
+/** Models for the main reply selector, filtered to configured providers. Always
+ *  keeps the currently-selected model visible even if its provider went away. */
+const availableModels = computed(() => {
+  const list = AI_MODELS.filter((m) => providerAvailable(m.provider));
+  const selected = versionForm.value.model;
+  if (selected && !list.some((m) => m.id === selected)) {
+    list.push({ id: selected, label: `${selected} (unavailable)`, provider: providerForModel(selected) });
+  }
+  return list;
+});
+
+/** Cheap models for the opening-message selector, filtered to configured providers. */
+const availableOpeningModels = computed(() => {
+  const list = AI_MODELS.filter((m) => m.cheap && providerAvailable(m.provider));
+  const selected = versionForm.value.opening_message_model;
+  if (selected && selected !== 'static' && !list.some((m) => m.id === selected)) {
+    list.push({ id: selected, label: `${selected} (unavailable)`, provider: providerForModel(selected), cheap: true });
+  }
+  return list;
+});
+
+async function fetchEnvStatus() {
+  if (!workspaceId) return;
+  try {
+    const params = new URLSearchParams({ workspace_id: workspaceId });
+    const res = await fetch(`${API_BASE}/api-integrations-env-status?${params}`);
+    if (!res.ok) return;
+    const status = await res.json();
+    const set = new Set<AIProviderKey>();
+    if (status?.openai?.configured) set.add('openai');
+    if (status?.anthropic?.configured) set.add('anthropic');
+    availableProviders.value = set;
+  } catch {
+    // Leave as null → show all models rather than blocking the editor.
+  }
+}
+
 function normalizeVersion(version?: VersionRecord | null): PromptFields {
   if (!version) return structuredClone(DEFAULT_PROMPT_FIELDS);
 
@@ -484,6 +561,8 @@ function normalizeVersion(version?: VersionRecord | null): PromptFields {
 
   return {
     prompt_text: version.prompt_text ?? '',
+    opening_message: String(config.opening_message ?? ''),
+    opening_message_model: String(config.opening_message_model ?? 'static'),
     tone: String(systemRules.tone ?? 'friendly'),
     max_message_length: Number(systemRules.max_message_length ?? 160),
     reply_delay_seconds: cadence.reply_delay_seconds !== undefined
@@ -508,6 +587,8 @@ function syncPromptFormFromActiveVersion() {
 function promptFingerprint(fields: PromptFields): string {
   return JSON.stringify({
     prompt_text: fields.prompt_text,
+    opening_message: fields.opening_message,
+    opening_message_model: fields.opening_message_model,
     tone: fields.tone,
     max_message_length: fields.max_message_length,
     reply_delay_seconds: fields.reply_delay_seconds,
@@ -543,8 +624,14 @@ function buildVersionPayload(fields: PromptFields) {
       required_fields: fields.required_fields,
     },
     config_json: {
-      ...(fields.model ? { model: fields.model } : {}),
+      ...(fields.model ? { model: fields.model, provider: providerForModel(fields.model) } : {}),
       temperature: fields.temperature,
+      ...(fields.opening_message.trim()
+        ? {
+            opening_message: fields.opening_message.trim(),
+            opening_message_model: fields.opening_message_model,
+          }
+        : {}),
     },
   };
 }
@@ -801,7 +888,7 @@ async function toggleCalendarAssignment(calendarId: string, checked: boolean) {
 onMounted(async () => {
   const session = await getSessionContext();
   workspaceId = session.workspaceId;
-  await fetchAgent();
+  await Promise.all([fetchEnvStatus(), fetchAgent()]);
   await fetchCalendars();
 });
 </script>

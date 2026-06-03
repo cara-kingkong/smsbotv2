@@ -40,10 +40,33 @@ export interface AIPromptContext {
   available_calendars: Array<{ id: string; name: string }>;
   available_slots?: string[];
   rules: Record<string, unknown>;
+  /** Model id from the agent's config_json. Adapter falls back to its default when unset. */
+  model?: string;
+  /** Sampling temperature from the agent's config_json. */
+  temperature?: number;
+}
+
+export interface OpeningMessageContext {
+  /**
+   * The opening message: either a near-final draft or prompt-style instructions
+   * with conditional variants. Merge fields are already substituted.
+   */
+  message: string;
+  first_name?: string | null;
+  /** Short description of why we're reaching out (from the lead's source metadata),
+   *  used by the model to pick the right conditional variant. */
+  context?: string;
+  /** Provider model id to use for the lightweight personalization call. */
+  model?: string;
 }
 
 export interface AIProviderAdapter {
   generateReply(context: AIPromptContext): Promise<AIDecision>;
+  /**
+   * Lightly personalize a semi-static opening SMS using a cheap model.
+   * No decision schema, no conversation context — just rephrase/insert the name.
+   */
+  generateOpening?(context: OpeningMessageContext): Promise<string>;
 }
 
 // ─── CRM Adapter ─────────────────────────────────────────────
