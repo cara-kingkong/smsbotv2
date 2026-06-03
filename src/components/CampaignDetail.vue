@@ -163,7 +163,7 @@
               :disabled="calendarToggling === cal.id"
               @change="toggleCalendarAssignment(cal.id, ($event.target as HTMLInputElement).checked)"
             />
-            <span class="font-medium text-slate-800">{{ cal.name }}</span>
+            <span class="font-medium text-slate-800">{{ calendarLabel(cal) }}</span>
             <span v-if="cal.booking_url" class="text-xs text-slate-400 truncate max-w-xs">{{ cal.booking_url }}</span>
           </label>
         </div>
@@ -432,6 +432,12 @@ interface CalendarRecord {
   name: string;
   booking_url?: string | null;
   status?: string;
+  settings_json?: Record<string, unknown>;
+}
+
+function calendarLabel(cal: CalendarRecord): string {
+  const label = cal.settings_json?.label;
+  return typeof label === 'string' && label ? label : cal.name;
 }
 
 const workspaceCalendars = ref<CalendarRecord[]>([]);
