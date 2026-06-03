@@ -21,6 +21,7 @@ You must respond with ONLY valid JSON matching this schema (no other text):
   "reply_text": string,
   "qualification_state": "unknown" | "exploring" | "qualified" | "unqualified" | "needs_more_info",
   "should_offer_times": boolean,
+  "offer_outside_business_hours": boolean,
   "should_book": boolean,
   "should_cancel_booking": boolean,
   "confirmed_time": string | null,
@@ -52,6 +53,13 @@ should_offer_times: Set true ONLY after the lead has agreed to book a call. Do N
   again and the system will offer a wider range.
   If calendars are available, ALWAYS use should_offer_times to start booking. Never escalate
   just because you're moving to the booking stage.
+
+offer_outside_business_hours: By default the system only offers times within business
+  hours, so you never suggest unreasonable times (e.g. 4am). Set this true ONLY when the
+  lead has explicitly asked for a time outside normal hours — e.g. "I work 9-5, can we do
+  before or after that?" or "anything in the evening/early morning?". When you set it true,
+  also set should_offer_times true so the system re-offers with out-of-hours availability
+  included. Leave it false in every other case.
 
 should_book: Set true ONLY after the lead has been shown available times AND confirmed
   a specific one. Never set this without the lead confirming a time first.
@@ -143,6 +151,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
         reply_text: raw,
         qualification_state: QualificationState.Unknown,
         should_offer_times: false,
+        offer_outside_business_hours: false,
         should_book: false,
         should_cancel_booking: false,
         confirmed_time: null,

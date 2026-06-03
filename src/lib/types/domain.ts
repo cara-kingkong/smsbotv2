@@ -336,6 +336,10 @@ export interface AIDecision {
   reply_text: string;
   qualification_state: QualificationState;
   should_offer_times: boolean;
+  /** When true, the lead has explicitly asked for times outside business hours,
+   *  so the system offers the full calendar availability instead of the default
+   *  business-hours-only window. */
+  offer_outside_business_hours: boolean;
   should_book: boolean;
   should_cancel_booking: boolean;
   confirmed_time: string | null;

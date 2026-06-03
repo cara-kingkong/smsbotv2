@@ -105,6 +105,7 @@ export class AIService {
         ? raw.qualification_state
         : QualificationState.Unknown,
       should_offer_times: typeof raw.should_offer_times === 'boolean' ? raw.should_offer_times : false,
+      offer_outside_business_hours: typeof raw.offer_outside_business_hours === 'boolean' ? raw.offer_outside_business_hours : false,
       should_book: typeof raw.should_book === 'boolean' ? raw.should_book : false,
       should_cancel_booking: typeof raw.should_cancel_booking === 'boolean' ? raw.should_cancel_booking : false,
       confirmed_time: typeof raw.confirmed_time === 'string' ? raw.confirmed_time : null,

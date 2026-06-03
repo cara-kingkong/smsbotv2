@@ -25,7 +25,7 @@ import { CRMService } from '../../src/lib/crm/service';
 import { buildConversationNote } from '../../src/lib/crm/notes';
 import type { AIProviderAdapter, AIDecision, Calendar } from '../../src/lib/types';
 import { CalendlyAdapter } from '../../src/lib/calendar/adapters/calendly';
-import { isWithinBusinessHours, getNextBusinessHoursStart } from '../../src/lib/utils/business-hours';
+import { isWithinBusinessHours, getNextBusinessHoursStart, filterSlotsWithinBusinessHours } from '../../src/lib/utils/business-hours';
 import { evaluateStopConditions } from '../../src/lib/utils/stop-conditions';
 import { detectBookingAcceptance } from '../../src/lib/utils/booking-guard';
 import { runQueueJob } from '../../src/lib/queues/job-runner';
@@ -273,6 +273,7 @@ export default async (req: Request, _context: Context) =>
         reply_text: openingText,
         qualification_state: QualificationState.Unknown,
         should_offer_times: false,
+        offer_outside_business_hours: false,
         should_book: false,
         should_cancel_booking: false,
         confirmed_time: null,
@@ -342,13 +343,24 @@ export default async (req: Request, _context: Context) =>
     if (decision.should_offer_times && !decision.should_book && calendars.length > 0) {
       const slotsCalendar = calendars[0];
       const isReOffer = !!priorSlotsEvent;
-      const allSlots = await fetchAllCalendlySlots(db, slotsCalendar);
-      const offeredSlots = isReOffer
-        ? spreadSlots(allSlots, 3)
-        : pickInitialSlots(allSlots, lead.timezone);
+      const rawSlots = await fetchAllCalendlySlots(db, slotsCalendar);
+      // Guardrail: by default only offer slots within business hours (in the
+      // lead's timezone) so we never suggest 4am/midnight call times. When the
+      // lead has explicitly asked for an out-of-hours time, the AI sets
+      // offer_outside_business_hours and we open up the full availability and
+      // spread the offer across the day so early/late options surface.
+      const relaxHours = decision.offer_outside_business_hours === true;
+      const allSlots = relaxHours
+        ? rawSlots
+        : filterSlotsWithinBusinessHours(rawSlots, effectiveBusinessHours, lead.timezone);
+      const offeredSlots = relaxHours
+        ? spreadAcrossPool(allSlots, 3)
+        : isReOffer
+          ? spreadSlots(allSlots, 3)
+          : pickInitialSlots(allSlots, lead.timezone);
 
       if (offeredSlots.length > 0) {
-        const formatted = isReOffer
+        const formatted = (relaxHours || isReOffer)
           ? formatSlotsFallback(offeredSlots, lead.timezone)
           : formatSlotsInitial(offeredSlots, lead.timezone);
         const combinedReply = decision.reply_text
@@ -886,6 +898,22 @@ function pickInitialSlots(allSlots: string[], leadTimezone?: string | null): str
   }
 
   return picked.length > 0 ? picked : spreadSlots(allSlots, 3);
+}
+
+/**
+ * Pick `count` slots sampled evenly across the whole pool (by index) rather than
+ * greedily from the front. Used when the lead has asked for out-of-hours times,
+ * so the offer spans a genuine range (early through late, across days) instead of
+ * dumping the earliest available slots. Input is assumed chronologically sorted.
+ */
+function spreadAcrossPool(allSlots: string[], count: number): string[] {
+  if (allSlots.length <= count) return allSlots;
+  const step = (allSlots.length - 1) / (count - 1);
+  const picked: string[] = [];
+  for (let i = 0; i < count; i++) {
+    picked.push(allSlots[Math.round(i * step)]);
+  }
+  return picked;
 }
 
 /** Fallback: pick slots spread at least 1 hour apart (for re-offers) */
