@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { AIProviderAdapter, AIPromptContext, AIDecision, OpeningMessageContext } from '@lib/types';
 import { QualificationState } from '@lib/types';
+import { reactionPromptNote } from '@lib/utils/reaction';
 
 const DEFAULT_OPENING_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -120,6 +121,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
       `Lead: ${context.lead.first_name} ${context.lead.last_name ?? ''}`.trim(),
       context.lead.timezone ? `Timezone: ${context.lead.timezone}` : '',
       '',
+      context.latest_inbound_reaction ? reactionPromptNote(context.latest_inbound_reaction) + '\n' : '',
       DECISION_SCHEMA,
     ].join('\n');
 

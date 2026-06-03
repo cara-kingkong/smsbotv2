@@ -44,6 +44,12 @@ export interface AIPromptContext {
   model?: string;
   /** Sampling temperature from the agent's config_json. */
   temperature?: number;
+  /**
+   * Set when the lead's most recent inbound message looks like an emoji
+   * reaction or tapback (not a real message). The model uses this to decide
+   * whether a reply is natural — usually it isn't.
+   */
+  latest_inbound_reaction?: { kind: 'tapback' | 'emoji'; description: string };
 }
 
 export interface OpeningMessageContext {

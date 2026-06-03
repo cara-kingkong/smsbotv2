@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AIProviderAdapter, AIPromptContext, AIDecision, AgentVersion, Message, Lead } from '@lib/types';
-import { QualificationState } from '@lib/types';
+import { QualificationState, MessageDirection } from '@lib/types';
+import { detectReaction } from '@lib/utils/reaction';
 
 export class AIService {
   constructor(
@@ -44,6 +45,16 @@ export class AIService {
       available_slots: input.available_slots,
       rules: input.agent_version.system_rules_json,
     };
+
+    // Flag when the lead's latest inbound is an emoji reaction / tapback so the
+    // model can decide whether replying is natural (usually it isn't).
+    const latestInbound = [...input.conversation_history]
+      .reverse()
+      .find((m) => m.direction === MessageDirection.Inbound);
+    if (latestInbound) {
+      const reaction = detectReaction(latestInbound.body_text);
+      if (reaction) context.latest_inbound_reaction = reaction;
+    }
 
     const decision = await adapter.generateReply(context);
 

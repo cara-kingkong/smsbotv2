@@ -28,6 +28,7 @@ import { CalendlyAdapter } from '../../src/lib/calendar/adapters/calendly';
 import { isWithinBusinessHours, getNextBusinessHoursStart, filterSlotsWithinBusinessHours } from '../../src/lib/utils/business-hours';
 import { evaluateStopConditions } from '../../src/lib/utils/stop-conditions';
 import { detectBookingAcceptance } from '../../src/lib/utils/booking-guard';
+import { detectReaction } from '../../src/lib/utils/reaction';
 import { runQueueJob } from '../../src/lib/queues/job-runner';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 
@@ -202,6 +203,12 @@ export default async (req: Request, _context: Context) =>
 
     await heartbeat();
     const history = await messagingService.getHistory(conversation_id);
+
+    // Is the lead's latest inbound message an emoji reaction / tapback? If the
+    // AI then chooses not to reply, we treat that as intentional silence rather
+    // than escalating to a human (see the no-action handling further down).
+    const lastInbound = [...history].reverse().find((m) => m.direction === MessageDirection.Inbound);
+    const latestInboundReaction = lastInbound ? detectReaction(lastInbound.body_text) : null;
 
     const aiAdapters = new Map<string, AIProviderAdapter>();
     if (process.env.OPENAI_API_KEY) aiAdapters.set('openai', new OpenAIAdapter(process.env.OPENAI_API_KEY));
@@ -659,6 +666,31 @@ export default async (req: Request, _context: Context) =>
         }
       }
       return new Response('Needs human', { status: 200 });
+    }
+
+    // Intentional silence on a reaction: when the lead's latest inbound is just
+    // an emoji reaction / tapback and the AI deliberately chose not to reply,
+    // stay quiet — don't escalate or send a "team is reviewing" message. Not
+    // replying to a 👍 is the natural, human behaviour.
+    if (
+      !tookAction &&
+      !bookingQueued &&
+      !decision.should_reply &&
+      !decision.escalate_to_human &&
+      latestInboundReaction
+    ) {
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: 'ai_skipped_reaction',
+        event_payload_json: {
+          reaction_kind: latestInboundReaction.kind,
+          reaction_description: latestInboundReaction.description,
+          qualification_state: decision.qualification_state,
+          reason_summary: decision.reason_summary,
+        },
+      });
+      await conversationService.updateStatus(conversation_id, ConversationStatus.WaitingForLead);
+      return new Response('Skipped reaction — no reply needed', { status: 200 });
     }
 
     if (!tookAction && trigger === 'inbound_message') {
