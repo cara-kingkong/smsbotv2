@@ -205,8 +205,16 @@ export default async (req: Request, _context: Context) =>
       );
       const messagingService = new MessagingService(db, twilioAdapter);
 
+      // Best-effort: find out who the lead will be speaking with (the Calendly host).
+      let hostFirstName: string | null = null;
+      if (bookingResult.event_uri) {
+        const hostName = await new CalendlyAdapter(apiKey).getEventHostName(bookingResult.event_uri);
+        hostFirstName = hostName ? hostName.split(/\s+/)[0] : null;
+      }
+
       // Build a warm, human confirmation - no booking links (per prompt rules)
-      let confirmationBody = 'You\'re all set!';
+      const withWho = hostFirstName ? ` You're booked in with ${hostFirstName}.` : '';
+      let confirmationBody = `You're all set!${withWho}`;
       if (lead.email) {
         confirmationBody += ` Confirmation email heading to ${lead.email} now.`;
       }
@@ -219,7 +227,7 @@ export default async (req: Request, _context: Context) =>
           minute: '2-digit',
           hour12: true,
         }).replace(':00', '').toLowerCase();
-        confirmationBody = `You're all set for ${formatted} (Melbourne time)! Confirmation email heading to ${lead.email ?? 'your inbox'} now.`;
+        confirmationBody = `You're all set for ${formatted} (Melbourne time)!${withWho} Confirmation email heading to ${lead.email ?? 'your inbox'} now.`;
       }
 
       const confirmationMessage = await messagingService.queueOutbound({
