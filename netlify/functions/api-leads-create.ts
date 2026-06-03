@@ -4,12 +4,13 @@ import { LeadService } from '../../src/lib/leads/service';
 import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 import { requireRole } from '../../src/lib/auth/permissions';
 import { WorkspaceRole } from '../../src/lib/types';
+import { isValidTimezone } from '../../src/lib/utils/timezones';
 
 /**
  * Create or upsert a lead within a workspace.
  * POST /.netlify/functions/api-leads-create
  *
- * Body: { workspace_id, phone, first_name, last_name?, email?, timezone?, external_contact_id?, source_metadata? }
+ * Body: { workspace_id, phone, first_name, timezone, last_name?, email?, external_contact_id?, source_metadata? }
  */
 export default async (req: Request, _context: Context) => {
   if (req.method !== 'POST') {
@@ -22,9 +23,16 @@ export default async (req: Request, _context: Context) => {
     const body = await req.json();
     const { workspace_id, phone, first_name, last_name, email, timezone, external_contact_id, crm_provider, source_metadata } = body;
 
-    if (!workspace_id || !phone || !first_name) {
+    if (!workspace_id || !phone || !first_name || !timezone) {
       return new Response(
-        JSON.stringify({ error: 'Missing required fields: workspace_id, phone, first_name' }),
+        JSON.stringify({ error: 'Missing required fields: workspace_id, phone, first_name, timezone' }),
+        { status: 400 },
+      );
+    }
+
+    if (!isValidTimezone(timezone)) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid timezone — must be a valid IANA timezone (e.g. "Australia/Melbourne")' }),
         { status: 400 },
       );
     }

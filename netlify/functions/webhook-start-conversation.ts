@@ -6,6 +6,7 @@ import { AgentService } from '../../src/lib/agents/service';
 import { QueueService } from '../../src/lib/queues/service';
 import { PhoneNumberService } from '../../src/lib/messaging/phone-numbers';
 import type { StartConversationWebhookPayload } from '../../src/lib/types';
+import { isValidTimezone } from '../../src/lib/utils/timezones';
 import { nanoid } from 'nanoid';
 
 /**
@@ -36,6 +37,15 @@ export default async (req: Request, _context: Context) => {
         JSON.stringify({
           error:
             'Missing required fields: workspace_id, campaign_id, lead.phone, lead.first_name, lead.email, lead.timezone',
+        }),
+        { status: 400 },
+      );
+    }
+
+    if (!isValidTimezone(payload.lead.timezone)) {
+      return new Response(
+        JSON.stringify({
+          error: 'lead.timezone must be a valid IANA timezone (e.g. "Australia/Melbourne")',
         }),
         { status: 400 },
       );

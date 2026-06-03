@@ -3,6 +3,7 @@ import type { Lead } from '@lib/types';
 import { EntityStatus } from '@lib/types';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { PhoneNumberService } from '@lib/messaging/phone-numbers';
+import { isValidTimezone } from '@lib/utils/timezones';
 
 export interface UpsertLeadInput {
   workspace_id: string;
@@ -10,6 +11,7 @@ export interface UpsertLeadInput {
   first_name: string;
   last_name?: string;
   email?: string;
+  /** IANA timezone, required when creating a lead — drives all business-hours logic. */
   timezone?: string;
   external_contact_id?: string;
   crm_provider?: string;
@@ -26,6 +28,12 @@ export class LeadService {
     const defaultCountry = input.default_country
       ?? (await this.resolveWorkspaceDefaultCountry(input.workspace_id));
     const phoneE164 = this.normalizePhone(input.phone, defaultCountry);
+
+    // A timezone, when supplied, must be a real IANA zone — it drives every
+    // business-hours decision for this lead.
+    if (input.timezone != null && !isValidTimezone(input.timezone)) {
+      throw new Error(`Invalid timezone: ${input.timezone}`);
+    }
 
     // Check existing
     const { data: existing } = await this.db
@@ -56,7 +64,12 @@ export class LeadService {
       return updated;
     }
 
-    // Create new
+    // Create new — a lead must be created with a valid timezone so business
+    // hours can be evaluated in its local time.
+    if (!isValidTimezone(input.timezone)) {
+      throw new Error('Lead timezone is required and must be a valid IANA timezone');
+    }
+
     const { data, error } = await this.db
       .from('leads')
       .insert({
@@ -65,7 +78,7 @@ export class LeadService {
         first_name: input.first_name,
         last_name: input.last_name ?? '',
         email: input.email ?? null,
-        timezone: input.timezone ?? null,
+        timezone: input.timezone,
         external_contact_id: input.external_contact_id ?? null,
         crm_provider: input.crm_provider ?? null,
         status: EntityStatus.Active,

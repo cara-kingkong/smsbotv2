@@ -18,3 +18,21 @@ export function getTimezoneOptions(): TimezoneOption[] {
 }
 
 export const timezoneOptions: TimezoneOption[] = getTimezoneOptions();
+
+/**
+ * Validate that a string is a timezone the runtime understands via ICU
+ * (e.g. "Australia/Melbourne"). Accepts any IANA id Intl recognises —
+ * including legacy aliases like "EST" or "US/Eastern" — and rejects
+ * free-text like "Sydney", bare offsets ("GMT+10"), and empty strings.
+ * Every value the browser's Intl.supportedValuesOf('timeZone') produces
+ * passes this check, so frontend-selected zones are always accepted.
+ */
+export function isValidTimezone(tz: unknown): tz is string {
+  if (typeof tz !== 'string' || tz.length === 0) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
