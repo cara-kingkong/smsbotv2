@@ -5,6 +5,24 @@ import { reactionPromptNote } from '@lib/utils/reaction';
 import { followupPromptNote, FOLLOWUP_USER_TURN } from '@lib/utils/followups';
 
 const DEFAULT_OPENING_MODEL = 'claude-haiku-4-5-20251001';
+const DEFAULT_SUMMARY_MODEL = 'claude-haiku-4-5-20251001';
+
+const SITUATION_SUMMARY_SYSTEM_PROMPT = `You are summarizing an SMS conversation between a sales chatbot and a lead, for a sales rep who will read it in their CRM before calling the lead. Write a SHORT plain-text summary of the customer's situation, based ONLY on what the lead actually said.
+
+Cover the following when the lead mentioned them (and ONLY then):
+- Business type / industry
+- Current revenue
+- Marketing budget or ad spend
+- Main goal or problem they want solved
+- Timeline / urgency
+- Notable objections, constraints or context
+
+Rules:
+- Use only facts stated by the lead. NEVER guess, infer figures, or invent numbers.
+- Omit any item the lead didn't mention — do not list it as "unknown". Just leave it out.
+- Format as short labelled lines, e.g. "Revenue: ~$40k/mo". Keep the whole summary under ~120 words.
+- If the lead shared almost nothing useful, say so in a single line.
+- Output ONLY the summary text — no preamble, no headings, no closing remarks.`;
 
 const OPENING_SYSTEM_PROMPT = `You are writing the FIRST outbound SMS to a new lead. Below are the opening-message instructions. They may be a single message OR prompt-style guidance with conditional variants (e.g. one version when a first name is known and another when it isn't, or different versions depending on the reason for reaching out).
 
@@ -196,6 +214,17 @@ export class AnthropicAdapter implements AIProviderAdapter {
 
     const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '';
     return text || context.message;
+  }
+
+  async summarizeSituation(transcript: string): Promise<string> {
+    const response = await this.client.messages.create({
+      model: DEFAULT_SUMMARY_MODEL,
+      max_tokens: 400,
+      system: SITUATION_SUMMARY_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: transcript }],
+    });
+
+    return response.content[0]?.type === 'text' ? response.content[0].text.trim() : '';
   }
 }
 

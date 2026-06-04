@@ -80,6 +80,12 @@ export interface AIProviderAdapter {
    * No decision schema, no conversation context — just rephrase/insert the name.
    */
   generateOpening?(context: OpeningMessageContext): Promise<string>;
+  /**
+   * Summarize the lead's situation (revenue, marketing budget, goals, etc.) from
+   * a conversation transcript, for a sales rep reading the contact in their CRM.
+   * Uses a cheap model. Returns plain text built only from facts the lead stated.
+   */
+  summarizeSituation?(transcript: string): Promise<string>;
 }
 
 // ─── CRM Adapter ─────────────────────────────────────────────

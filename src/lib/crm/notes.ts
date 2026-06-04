@@ -1,5 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { AIProviderAdapter } from '@lib/types';
 import { MessageDirection, SenderType } from '@lib/types';
+import { OpenAIAdapter } from '@lib/ai/adapters/openai';
+import { AnthropicAdapter } from '@lib/ai/adapters/anthropic';
 
 export interface ConversationNoteContext {
   /** Headline shown at the top of the note — e.g. "Lead QUALIFIED via SMS chatbot". */
@@ -64,11 +67,10 @@ export async function buildConversationNote(
     lines.push(`Qualification state: ${qualificationState}`);
   }
 
-  lines.push('');
-  lines.push('--- Conversation transcript ---');
-
+  // Build the transcript first so we can both summarize it and append it.
+  const transcriptLines: string[] = [];
   if (messages.length === 0) {
-    lines.push('(No messages were exchanged.)');
+    transcriptLines.push('(No messages were exchanged.)');
   } else {
     for (const msg of messages) {
       const timestamp = msg.sent_at || msg.received_at || msg.created_at;
@@ -76,11 +78,51 @@ export async function buildConversationNote(
       const sender = labelForSender(msg.direction, msg.sender_type);
       // Indent multi-line bodies so the sender label stays visually anchored.
       const body = msg.body_text?.replace(/\n/g, '\n    ') ?? '';
-      lines.push(`[${ts}] ${sender}: ${body}`);
+      transcriptLines.push(`[${ts}] ${sender}: ${body}`);
     }
   }
 
+  // Summarize the customer's situation (revenue, marketing budget, goals, etc.)
+  // and surface it ABOVE the transcript so a sales rep gets the gist at a glance.
+  // Best-effort: if no AI key is configured or the call fails, we simply omit the
+  // section — the note (and full transcript) still goes out.
+  if (messages.length > 0) {
+    const summary = await summarizeSituation(transcriptLines.join('\n'));
+    if (summary) {
+      lines.push('');
+      lines.push('--- Customer situation ---');
+      lines.push(summary);
+    }
+  }
+
+  lines.push('');
+  lines.push('--- Conversation transcript ---');
+  for (const line of transcriptLines) lines.push(line);
+
   return lines.join('\n');
+}
+
+/**
+ * Generate a short summary of the lead's situation from the transcript using a
+ * cheap model. Returns an empty string (so the caller skips the section) when no
+ * AI provider is configured or the call fails — never throws.
+ */
+async function summarizeSituation(transcript: string): Promise<string> {
+  const adapter = buildSummarizerAdapter();
+  if (!adapter?.summarizeSituation) return '';
+  try {
+    return (await adapter.summarizeSituation(transcript)).trim();
+  } catch (err) {
+    console.warn('Situation summary failed; omitting from CRM note:', err);
+    return '';
+  }
+}
+
+/** Pick whichever AI provider has credentials, preferring OpenAI (the default). */
+function buildSummarizerAdapter(): AIProviderAdapter | null {
+  if (process.env.OPENAI_API_KEY) return new OpenAIAdapter(process.env.OPENAI_API_KEY);
+  if (process.env.ANTHROPIC_API_KEY) return new AnthropicAdapter(process.env.ANTHROPIC_API_KEY);
+  return null;
 }
 
 function labelForSender(direction: string, senderType: string): string {
