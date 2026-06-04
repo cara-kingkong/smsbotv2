@@ -104,6 +104,7 @@ export enum ConversationEventType {
   MessageSent = 'message_sent',
   MessageReceived = 'message_received',
   AIReplyGenerated = 'ai_reply_generated',
+  FollowupSent = 'followup_sent',
   StopConditionReached = 'stop_condition_reached',
   QualificationChanged = 'qualification_changed',
   SlotsOffered = 'slots_offered',

@@ -27,6 +27,7 @@ import type { AIProviderAdapter, AIDecision, Calendar } from '../../src/lib/type
 import { CalendlyAdapter } from '../../src/lib/calendar/adapters/calendly';
 import { isWithinBusinessHours, getNextBusinessHoursStart, filterSlotsWithinBusinessHours } from '../../src/lib/utils/business-hours';
 import { evaluateStopConditions } from '../../src/lib/utils/stop-conditions';
+import { countConsecutiveFollowups } from '../../src/lib/utils/followups';
 import { detectBookingAcceptance } from '../../src/lib/utils/booking-guard';
 import { detectReaction } from '../../src/lib/utils/reaction';
 import { runQueueJob } from '../../src/lib/queues/job-runner';
@@ -520,15 +521,32 @@ export default async (req: Request, _context: Context) =>
 
       await conversationService.updateStatus(conversation_id, ConversationStatus.WaitingForLead);
 
-      const cadence = version.reply_cadence_json;
+      // Follow-up cadence tracks the agent's ACTIVE version (an operational
+      // setting), not the version pinned to this conversation — so edits to
+      // max_followups / followup_delay_seconds take effect on in-flight
+      // conversations. This matches the safety-net cron (process-followup-check),
+      // which also reads the active version. The pinned `version` still governs
+      // the AI's behaviour (prompt, rules, model). Falls back to the pinned
+      // cadence only if no active version can be resolved.
+      const cadenceVersion = version.is_active
+        ? version
+        : (await agentService.getActiveVersion(conversation.agent_id)) ?? version;
+      const cadence = cadenceVersion.reply_cadence_json;
       if (!isTestConversation && cadence && cadence.max_followups > 0 && cadence.followup_delay_seconds > 0) {
-        const { count: followupCount } = await db
-          .from('conversation_events')
-          .select('*', { count: 'exact', head: true })
-          .eq('conversation_id', conversation_id)
-          .eq('event_type', ConversationEventType.AIReplyGenerated);
+        // If this reply was itself triggered by a follow-up job, the lead was
+        // silent — record it explicitly so max_followups counts consecutive
+        // nudges to a silent lead, not genuine back-and-forth replies.
+        if (trigger === 'followup_scheduled') {
+          await db.from('conversation_events').insert({
+            conversation_id,
+            event_type: ConversationEventType.FollowupSent,
+            event_payload_json: { followup_delay_seconds: cadence.followup_delay_seconds },
+          });
+        }
 
-        if ((followupCount ?? 0) < cadence.max_followups) {
+        const followupCount = await countConsecutiveFollowups(db, conversation_id);
+
+        if (followupCount < cadence.max_followups) {
           const followupRunAt = new Date(Date.now() + cadence.followup_delay_seconds * 1000);
           await queueService.enqueue({
             workspace_id: conversation.workspace_id,
