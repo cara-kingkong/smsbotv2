@@ -39,11 +39,53 @@ export interface AIPromptContext {
   available_calendar_ids: string[];
   available_calendars: Array<{ id: string; name: string }>;
   available_slots?: string[];
-  rules: Record<string, unknown>;
+  /** Model id from the agent's config_json. Adapter falls back to its default when unset. */
+  model?: string;
+  /** Sampling temperature from the agent's config_json. */
+  temperature?: number;
+  /**
+   * Set when the lead's most recent inbound message looks like an emoji
+   * reaction or tapback (not a real message). The model uses this to decide
+   * whether a reply is natural — usually it isn't.
+   */
+  latest_inbound_reaction?: { kind: 'tapback' | 'emoji'; description: string };
+  /**
+   * Set when this generation was triggered by the follow-up cadence (the lead
+   * has gone silent), not by an inbound message. `number` is which consecutive
+   * nudge this is (1-based) and `total` is the configured max_followups, so the
+   * model can escalate tone from a gentle nudge to a graceful final check-in and
+   * — crucially — knows NOT to just repeat its previous message.
+   */
+  followup?: { number: number; total: number };
+}
+
+export interface OpeningMessageContext {
+  /**
+   * The opening message: either a near-final draft or prompt-style instructions
+   * with conditional variants. Merge fields are already substituted.
+   */
+  message: string;
+  first_name?: string | null;
+  /** Short description of why we're reaching out (from the lead's source metadata),
+   *  used by the model to pick the right conditional variant. */
+  context?: string;
+  /** Provider model id to use for the lightweight personalization call. */
+  model?: string;
 }
 
 export interface AIProviderAdapter {
   generateReply(context: AIPromptContext): Promise<AIDecision>;
+  /**
+   * Lightly personalize a semi-static opening SMS using a cheap model.
+   * No decision schema, no conversation context — just rephrase/insert the name.
+   */
+  generateOpening?(context: OpeningMessageContext): Promise<string>;
+  /**
+   * Summarize the lead's situation (revenue, marketing budget, goals, etc.) from
+   * a conversation transcript, for a sales rep reading the contact in their CRM.
+   * Uses a cheap model. Returns plain text built only from facts the lead stated.
+   */
+  summarizeSituation?(transcript: string): Promise<string>;
 }
 
 // ─── CRM Adapter ─────────────────────────────────────────────

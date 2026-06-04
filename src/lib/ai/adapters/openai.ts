@@ -1,6 +1,38 @@
 import OpenAI from 'openai';
-import type { AIProviderAdapter, AIPromptContext, AIDecision } from '@lib/types';
+import type { AIProviderAdapter, AIPromptContext, AIDecision, OpeningMessageContext } from '@lib/types';
 import { QualificationState } from '@lib/types';
+import { reactionPromptNote } from '@lib/utils/reaction';
+import { followupPromptNote, FOLLOWUP_USER_TURN } from '@lib/utils/followups';
+
+const DEFAULT_OPENING_MODEL = 'gpt-4o-mini';
+const DEFAULT_SUMMARY_MODEL = 'gpt-4o-mini';
+
+const SITUATION_SUMMARY_SYSTEM_PROMPT = `You are summarizing an SMS conversation between a sales chatbot and a lead, for a sales rep who will read it in their CRM before calling the lead. Write a SHORT plain-text summary of the customer's situation, based ONLY on what the lead actually said.
+
+Cover the following when the lead mentioned them (and ONLY then):
+- Business type / industry
+- Current revenue
+- Marketing budget or ad spend
+- Main goal or problem they want solved
+- Timeline / urgency
+- Notable objections, constraints or context
+
+Rules:
+- Use only facts stated by the lead. NEVER guess, infer figures, or invent numbers.
+- Omit any item the lead didn't mention — do not list it as "unknown". Just leave it out.
+- Format as short labelled lines, e.g. "Revenue: ~$40k/mo". Keep the whole summary under ~120 words.
+- If the lead shared almost nothing useful, say so in a single line.
+- Output ONLY the summary text — no preamble, no headings, no closing remarks.`;
+
+const OPENING_SYSTEM_PROMPT = `You are writing the FIRST outbound SMS to a new lead. Below are the opening-message instructions. They may be a single message OR prompt-style guidance with conditional variants (e.g. one version when a first name is known and another when it isn't, or different versions depending on the reason for reaching out).
+
+Your job:
+- Choose the SINGLE most appropriate variant for this lead, using the first name and context provided.
+- If a first name is given, address them by it; if not, use the no-name variant (never write a literal placeholder like "[Name]").
+- Match the variant to the context when the instructions branch on it; if no context fits, use the most general/default variant.
+- Keep it natural, warm and SMS-friendly. Preserve the sender's wording and tone — do not invent new offers, links, or emojis that the instructions don't include.
+
+Reply with ONLY the final SMS text — no options, no quotes, no explanation.`;
 
 const DECISION_SCHEMA = `
 You must respond with valid JSON matching this schema:
@@ -9,6 +41,7 @@ You must respond with valid JSON matching this schema:
   "reply_text": string,
   "qualification_state": "unknown" | "exploring" | "qualified" | "unqualified" | "needs_more_info",
   "should_offer_times": boolean,
+  "offer_outside_business_hours": boolean,
   "should_book": boolean,
   "should_cancel_booking": boolean,
   "confirmed_time": string | null,
@@ -40,6 +73,13 @@ should_offer_times: Set true ONLY after the lead has agreed to book a call. Do N
   again and the system will offer a wider range.
   If calendars are available, ALWAYS use should_offer_times to start booking. Never escalate
   just because you're moving to the booking stage.
+
+offer_outside_business_hours: By default the system only offers times within business
+  hours, so you never suggest unreasonable times (e.g. 4am). Set this true ONLY when the
+  lead has explicitly asked for a time outside normal hours — e.g. "I work 9-5, can we do
+  before or after that?" or "anything in the evening/early morning?". When you set it true,
+  also set should_offer_times true so the system re-offers with out-of-hours availability
+  included. Leave it false in every other case.
 
 should_book: Set true ONLY after the lead has been shown available times AND confirmed
   a specific one. Never set this without the lead confirming a time first.
@@ -101,6 +141,8 @@ export class OpenAIAdapter implements AIProviderAdapter {
           `Lead: ${context.lead.first_name} ${context.lead.last_name ?? ''}`.trim(),
           context.lead.timezone ? `Timezone: ${context.lead.timezone}` : '',
           '',
+          context.latest_inbound_reaction ? reactionPromptNote(context.latest_inbound_reaction) + '\n' : '',
+          context.followup ? followupPromptNote(context.followup) + '\n' : '',
           DECISION_SCHEMA,
         ].join('\n'),
       },
@@ -114,11 +156,18 @@ export class OpenAIAdapter implements AIProviderAdapter {
       });
     }
 
+    // On a follow-up the transcript ends on the AI's own (assistant) message, so
+    // append a synthetic user turn — otherwise the model just continues / repeats
+    // itself.
+    if (context.followup && messages[messages.length - 1]?.role === 'assistant') {
+      messages.push({ role: 'user', content: FOLLOWUP_USER_TURN });
+    }
+
     const completion = await this.client.chat.completions.create({
-      model: 'gpt-4o',
+      model: context.model || 'gpt-4o',
       messages,
       response_format: { type: 'json_object' },
-      temperature: 0.7,
+      temperature: context.temperature ?? 0.7,
       max_tokens: 1000,
     });
 
@@ -133,6 +182,7 @@ export class OpenAIAdapter implements AIProviderAdapter {
         reply_text: raw,
         qualification_state: QualificationState.Unknown,
         should_offer_times: false,
+        offer_outside_business_hours: false,
         should_book: false,
         should_cancel_booking: false,
         confirmed_time: null,
@@ -143,6 +193,44 @@ export class OpenAIAdapter implements AIProviderAdapter {
         reason_summary: 'Structured output parse failure — escalating',
       };
     }
+  }
+
+  async generateOpening(context: OpeningMessageContext): Promise<string> {
+    const completion = await this.client.chat.completions.create({
+      model: context.model || DEFAULT_OPENING_MODEL,
+      messages: [
+        { role: 'system', content: OPENING_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: [
+            context.first_name ? `Lead's first name: ${context.first_name}` : 'Lead has no first name on file.',
+            `Context for outreach: ${context.context || 'none provided'}`,
+            '',
+            'Opening message instructions:',
+            context.message,
+          ].join('\n'),
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 200,
+    });
+
+    const text = completion.choices[0]?.message?.content?.trim() ?? '';
+    return text || context.message;
+  }
+
+  async summarizeSituation(transcript: string): Promise<string> {
+    const completion = await this.client.chat.completions.create({
+      model: DEFAULT_SUMMARY_MODEL,
+      messages: [
+        { role: 'system', content: SITUATION_SUMMARY_SYSTEM_PROMPT },
+        { role: 'user', content: transcript },
+      ],
+      temperature: 0.3,
+      max_tokens: 400,
+    });
+
+    return completion.choices[0]?.message?.content?.trim() ?? '';
   }
 }
 

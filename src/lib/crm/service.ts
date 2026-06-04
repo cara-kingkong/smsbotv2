@@ -52,27 +52,37 @@ export class CRMService {
     if (!adapter) throw new Error(`No CRM adapter for: ${providerKey}`);
 
     try {
-      let result: { success: boolean; raw_response: Record<string, unknown> };
+      const payload = event.request_payload_json as Record<string, unknown>;
+      const externalContactId = payload.external_contact_id as string;
+      const tagName = typeof payload.tag_name === 'string' ? payload.tag_name.trim() : '';
+      const noteBody = typeof payload.note_body === 'string' ? payload.note_body : '';
 
-      switch (event.event_type) {
-        case CRMEventType.ConversationBooked:
-          result = await adapter.applyTag({
-            external_contact_id: event.request_payload_json.external_contact_id as string,
-            tag_name: event.request_payload_json.tag_name as string,
-          });
-          break;
-        default:
-          result = await adapter.createNote({
-            external_contact_id: event.request_payload_json.external_contact_id as string,
-            note_body: event.request_payload_json.note_body as string,
-          });
+      // Apply tag first (if mapped for this event type / campaign), then drop a
+      // note. Either is optional — an event with neither is a no-op success,
+      // which keeps idempotent retries safe.
+      const responses: Record<string, unknown> = {};
+
+      if (tagName) {
+        const tagResult = await adapter.applyTag({
+          external_contact_id: externalContactId,
+          tag_name: tagName,
+        });
+        responses.apply_tag = tagResult.raw_response;
+      }
+
+      if (noteBody) {
+        const noteResult = await adapter.createNote({
+          external_contact_id: externalContactId,
+          note_body: noteBody,
+        });
+        responses.create_note = noteResult.raw_response;
       }
 
       await this.db
         .from('crm_events')
         .update({
           status: CRMSyncStatus.Sent,
-          response_payload_json: result.raw_response,
+          response_payload_json: responses,
         })
         .eq('id', eventId);
 

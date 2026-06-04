@@ -9,6 +9,7 @@
         v-for="card in providerCards"
         :key="card.provider"
         class="panel flex h-full flex-col"
+        :class="card.envConfigured ? 'opacity-75' : ''"
       >
         <div class="flex items-start justify-between gap-3">
           <div>
@@ -17,6 +18,13 @@
             <p class="section-copy mt-2">{{ card.description }}</p>
           </div>
           <span
+            v-if="card.envConfigured"
+            class="badge bg-slate-100 text-slate-600"
+          >
+            Env-managed
+          </span>
+          <span
+            v-else
             class="badge"
             :class="card.connected ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'"
           >
@@ -30,11 +38,19 @@
 
         <div v-if="!card.expanded" class="mt-5 flex-1">
           <div class="note-box">
-            <template v-if="card.provider === 'twilio' && card.envConfigured">
-              Connected via server environment variables. No additional configuration needed.
+            <template v-if="card.envConfigured">
+              <p class="font-medium text-slate-700">{{ card.name }} credentials are set in env vars.</p>
+              <p class="mt-1 text-slate-500">This section will be activated once credentials are moved to workspace config.</p>
+              <a
+                v-if="card.configPath"
+                :href="card.configPath"
+                class="mt-3 inline-flex items-center text-sm font-medium text-teal-600 hover:text-teal-700"
+              >
+                {{ card.configLabel ?? 'Open settings' }} &rarr;
+              </a>
             </template>
-            <template v-else-if="card.provider === 'twilio' && !card.envConfigured && !card.connected">
-              Twilio credentials must be set as environment variables on the server (<span class="font-mono text-xs">TWILIO_ACCOUNT_SID</span>, <span class="font-mono text-xs">TWILIO_AUTH_TOKEN</span>, <span class="font-mono text-xs">TWILIO_PHONE_NUMBER</span>).
+            <template v-else-if="card.provider === 'twilio' && !card.connected">
+              Twilio credentials must be set as environment variables on the server (<span class="font-mono text-xs">TWILIO_ACCOUNT_SID</span>, <span class="font-mono text-xs">TWILIO_AUTH_TOKEN</span>). Outbound numbers are configured per-workspace in the Phone Numbers section.
             </template>
             <template v-else-if="card.connected">
               Saved label: <span class="font-semibold text-slate-900">{{ card.savedName }}</span>
@@ -46,7 +62,7 @@
         </div>
 
         <div v-if="card.expanded" class="mt-5 space-y-4">
-          <div>
+          <div v-if="card.provider !== 'keap'">
             <label class="form-label">Label</label>
             <input
               v-model="card.form.label"
@@ -65,10 +81,9 @@
               <label class="form-label">Auth Token</label>
               <input v-model="card.form.auth_token" type="password" placeholder="********" class="input" />
             </div>
-            <div>
-              <label class="form-label">Phone Number</label>
-              <input v-model="card.form.phone_number" type="tel" placeholder="+1..." class="input" />
-            </div>
+            <p class="text-xs text-slate-500">
+              Phone numbers are managed in the Phone Numbers section, not here.
+            </p>
           </template>
 
           <template v-else-if="card.provider === 'openai'">
@@ -111,8 +126,21 @@
 
           <template v-else-if="card.provider === 'keap'">
             <div>
-              <label class="form-label">API Key</label>
-              <input v-model="card.form.api_key" type="password" placeholder="Your Keap API key" class="input" />
+              <label class="form-label">Personal Access Token</label>
+              <input
+                v-model="card.form.api_key"
+                type="password"
+                :placeholder="card.hasApiKey ? 'Token on file — leave blank to keep' : 'Paste your Keap PAT'"
+                class="input"
+              />
+              <p class="mt-1.5 text-xs text-slate-500">
+                Generate a Personal Access Token in your Keap developer account. PATs are
+                time-limited; if CRM sync stops working, generate a new one and paste it
+                here. Service Account Keys aren't supported.
+              </p>
+              <p v-if="card.hasApiKey" class="mt-1.5 text-xs text-slate-500">
+                A token is currently saved. Type a new one to replace it; leave blank to keep the existing token.
+              </p>
             </div>
           </template>
 
@@ -131,7 +159,7 @@
           </div>
         </div>
 
-        <div v-if="!card.expanded && !(card.provider === 'twilio' && card.envConfigured)" class="mt-6 flex flex-wrap gap-2">
+        <div v-if="!card.expanded && !card.envConfigured" class="mt-6 flex flex-wrap gap-2">
           <button class="button-secondary flex-1" @click="openConfig(card)">Configure</button>
           <button class="button-ghost" :class="!card.connected ? 'cursor-not-allowed opacity-50' : ''" :disabled="!card.connected" @click="validateConfig(card)">
             Validate config
@@ -170,13 +198,26 @@ interface ProviderCard {
   validationMessage: string;
   form: Record<string, string>;
   envConfigured?: boolean;
+  /** Server signals an api_key is on file; the field is left blank on the
+   *  client so the secret never round-trips to the browser. */
+  hasApiKey?: boolean;
+  // Optional deep link to a dedicated config page (e.g. calendar targets,
+  // phone numbers). Surfaced when the credential is env-managed so the user
+  // still has a way to do workspace-level setup.
+  configPath?: string;
+  configLabel?: string;
 }
 
-interface TwilioEnvStatus {
-  account_sid: boolean;
-  auth_token: boolean;
-  phone_number: boolean;
+interface ProviderEnvStatus {
   configured: boolean;
+}
+
+interface EnvStatusResponse {
+  twilio: ProviderEnvStatus & { account_sid: boolean; auth_token: boolean };
+  openai: ProviderEnvStatus;
+  anthropic: ProviderEnvStatus;
+  calendly: ProviderEnvStatus;
+  // Keap is workspace-configured, not env-managed.
 }
 
 const loading = ref(true);
@@ -198,7 +239,7 @@ const providerCards = reactive<ProviderCard[]>([
     saveSuccess: '',
     saveError: '',
     validationMessage: '',
-    form: { label: '', account_sid: '', auth_token: '', phone_number: '' },
+    form: { label: '', account_sid: '', auth_token: '' },
   },
   {
     provider: 'openai',
@@ -247,6 +288,8 @@ const providerCards = reactive<ProviderCard[]>([
     saveError: '',
     validationMessage: '',
     form: { label: '', api_key: '' },
+    configPath: '/calendar',
+    configLabel: 'Manage calendar targets',
   },
   {
     provider: 'keap',
@@ -277,12 +320,14 @@ async function fetchEnvStatus() {
   try {
     const res = await fetch(`${API_BASE}/api-integrations-env-status?${params}`);
     if (!res.ok) return;
-    const status: { twilio: TwilioEnvStatus } = await res.json();
+    const status = await res.json() as Partial<EnvStatusResponse>;
 
-    const twilioCard = providerCards.find((c) => c.provider === 'twilio');
-    if (twilioCard && status.twilio?.configured) {
-      twilioCard.envConfigured = true;
-      twilioCard.connected = true;
+    for (const card of providerCards) {
+      const providerStatus = status[card.provider as keyof EnvStatusResponse];
+      if (providerStatus?.configured) {
+        card.envConfigured = true;
+        card.connected = true;
+      }
     }
   } catch {
     // Non-critical — fall back to DB-only state
@@ -304,9 +349,14 @@ async function fetchIntegrations() {
       card.savedName = integration.name;
       card.existingId = integration.id;
 
-      const config = integration.config_json ?? {};
+      const config = (integration.config_json ?? {}) as Record<string, unknown>;
       card.form.label = integration.name;
+      // The server redacts secret fields (e.g. api_key, auth_token) and sends
+      // boolean flags instead. Pull those into UI state; never put the secret
+      // itself into a form input.
+      card.hasApiKey = config.has_api_key === true;
       for (const key of Object.keys(config)) {
+        if (key === 'api_key' || key === 'auth_token' || key === 'account_sid') continue;
         if (key in card.form) {
           card.form[key] = config[key] as string;
         }
@@ -328,8 +378,7 @@ function buildConfigJson(card: ProviderCard): Record<string, unknown> {
   if (card.provider === 'twilio') {
     config.account_sid_ref = card.form.account_sid ? 'TWILIO_ACCOUNT_SID' : '';
     config.auth_token_ref = card.form.auth_token ? 'TWILIO_AUTH_TOKEN' : '';
-    config.phone_number = card.form.phone_number;
-    config.configured = !!(card.form.account_sid && card.form.auth_token && card.form.phone_number);
+    config.configured = !!(card.form.account_sid && card.form.auth_token);
   } else if (card.provider === 'openai') {
     config.api_key_ref = card.form.api_key ? 'OPENAI_API_KEY' : '';
     config.model = card.form.model || 'gpt-4o';
@@ -342,8 +391,12 @@ function buildConfigJson(card: ProviderCard): Record<string, unknown> {
     config.personal_access_token_ref = card.form.api_key ? 'CALENDLY_PERSONAL_ACCESS_TOKEN' : '';
     config.configured = !!card.form.api_key;
   } else if (card.provider === 'keap') {
-    config.api_key_ref = card.form.api_key ? 'KEAP_API_KEY' : '';
-    config.configured = !!card.form.api_key;
+    // Persist the api_key directly in the integration row so the workspace
+    // owns its own credentials. Blank input on a re-save means "keep what's
+    // already stored" — the upsert endpoint merges around the missing field.
+    const trimmedKey = card.form.api_key?.trim();
+    if (trimmedKey) config.api_key = trimmedKey;
+    config.configured = !!(trimmedKey || card.hasApiKey);
   }
 
   return config;
@@ -394,7 +447,7 @@ function validateConfig(card: ProviderCard) {
   if (!card.connected) return;
 
   const requiredFields: Record<string, string[]> = {
-    twilio: ['account_sid', 'auth_token', 'phone_number'],
+    twilio: ['account_sid', 'auth_token'],
     openai: ['api_key', 'model'],
     anthropic: ['api_key', 'model'],
     calendly: ['api_key'],

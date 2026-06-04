@@ -157,6 +157,30 @@ export class CalendlyAdapter implements CalendarAdapter {
     return input.lead_company || 'Booked via SMS chatbot';
   }
 
+  /**
+   * Best-effort lookup of the host the lead will be meeting with.
+   * Reads the scheduled event's memberships (resolved at booking time, so
+   * correct for round-robin/collective events). Returns null if unavailable.
+   */
+  async getEventHostName(eventUri: string): Promise<string | null> {
+    try {
+      const eventUuid = eventUri.includes('/scheduled_events/')
+        ? eventUri.split('/scheduled_events/')[1].split('/')[0]
+        : eventUri.split('/').pop() ?? '';
+      if (!eventUuid) return null;
+
+      const result = await this.request(`/scheduled_events/${eventUuid}`, { method: 'GET' });
+      const resource = result.resource as Record<string, unknown> | undefined;
+      const memberships = (resource?.event_memberships ?? []) as Array<{ user_name?: string }>;
+      const hostName = memberships.find((m) => m.user_name)?.user_name?.trim();
+      console.log(`[Calendly] Event host for ${eventUuid}:`, hostName ?? '(none)');
+      return hostName || null;
+    } catch (err) {
+      console.warn('[Calendly] Failed to fetch event host name:', err);
+      return null;
+    }
+  }
+
   async cancelBooking(bookingId: string): Promise<{ success: boolean }> {
     // bookingId can be a full event URI or just a UUID
     const eventUuid = bookingId.includes('/scheduled_events/')

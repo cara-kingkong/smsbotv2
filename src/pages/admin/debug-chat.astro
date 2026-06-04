@@ -1,0 +1,20 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import DebugChat from '@components/DebugChat.vue';
+---
+
+<BaseLayout title="Debug Chat">
+  <div class="page-header">
+    <div class="page-header-row">
+      <div>
+        <h1 class="page-title">Debug Chat</h1>
+        <p class="page-subtitle">
+          Test conversations end-to-end without going through SMS. AI replies skip Twilio,
+          but Calendly bookings and CRM sync fire for real — use a throwaway email.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <DebugChat client:load />
+</BaseLayout>

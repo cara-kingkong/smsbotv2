@@ -9,6 +9,7 @@ export interface CreateConversationInput {
   agent_id: string;
   agent_version_id: string;
   lead_id: string;
+  is_test?: boolean;
 }
 
 export class ConversationService {
@@ -39,6 +40,7 @@ export class ConversationService {
         agent_version_id: input.agent_version_id,
         lead_id: input.lead_id,
         status: ConversationStatus.Queued,
+        ...(input.is_test ? { is_test: true } : {}),
       })
       .select()
       .single();

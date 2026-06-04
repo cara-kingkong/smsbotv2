@@ -79,7 +79,13 @@
               {{ agent.description }}
             </div>
           </div>
-          <span class="badge shrink-0" :class="statusClass(agent.status)">{{ agent.status }}</span>
+          <span
+            v-if="!agent.active_version_number"
+            class="badge shrink-0"
+            :class="statusClass('draft')"
+            title="This agent has no published prompt version yet"
+          >no prompt</span>
+          <span v-else class="badge shrink-0" :class="statusClass(agent.status)">{{ agent.status }}</span>
         </div>
       </a>
     </div>

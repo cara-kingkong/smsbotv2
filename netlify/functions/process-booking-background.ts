@@ -13,6 +13,7 @@ import {
   SenderType,
 } from '../../src/lib/types';
 import { CRMService } from '../../src/lib/crm/service';
+import { buildConversationNote } from '../../src/lib/crm/notes';
 import { AuditService } from '../../src/lib/audit/service';
 import { runQueueJob } from '../../src/lib/queues/job-runner';
 
@@ -204,8 +205,16 @@ export default async (req: Request, _context: Context) =>
       );
       const messagingService = new MessagingService(db, twilioAdapter);
 
+      // Best-effort: find out who the lead will be speaking with (the Calendly host).
+      let hostFirstName: string | null = null;
+      if (bookingResult.event_uri) {
+        const hostName = await new CalendlyAdapter(apiKey).getEventHostName(bookingResult.event_uri);
+        hostFirstName = hostName ? hostName.split(/\s+/)[0] : null;
+      }
+
       // Build a warm, human confirmation - no booking links (per prompt rules)
-      let confirmationBody = 'You\'re all set!';
+      const withWho = hostFirstName ? ` You're booked in with ${hostFirstName}.` : '';
+      let confirmationBody = `You're all set!${withWho}`;
       if (lead.email) {
         confirmationBody += ` Confirmation email heading to ${lead.email} now.`;
       }
@@ -218,7 +227,7 @@ export default async (req: Request, _context: Context) =>
           minute: '2-digit',
           hour12: true,
         }).replace(':00', '').toLowerCase();
-        confirmationBody = `You're all set for ${formatted} (Melbourne time)! Confirmation email heading to ${lead.email ?? 'your inbox'} now.`;
+        confirmationBody = `You're all set for ${formatted} (Melbourne time)!${withWho} Confirmation email heading to ${lead.email ?? 'your inbox'} now.`;
       }
 
       const confirmationMessage = await messagingService.queueOutbound({
@@ -236,7 +245,6 @@ export default async (req: Request, _context: Context) =>
           message_id: confirmationMessage.id,
           conversation_id,
           to: lead.phone_e164,
-          from: process.env.TWILIO_PHONE_NUMBER!,
         },
       });
 
@@ -284,6 +292,20 @@ export default async (req: Request, _context: Context) =>
       .single();
 
     if (crmIntegration && lead.external_contact_id) {
+      // Per-campaign tag mapping + name for the note subheading.
+      const { data: campaignRow } = await db
+        .from('campaigns')
+        .select('name, crm_tag_mappings_json')
+        .eq('id', conversation.campaign_id)
+        .maybeSingle();
+      const tagMappings = (campaignRow?.crm_tag_mappings_json ?? {}) as Record<string, string>;
+      const mappedTag = (tagMappings[CRMEventType.ConversationBooked] ?? '').toString().trim();
+
+      const noteBody = await buildConversationNote(db, conversation_id, {
+        headline: 'Lead BOOKED a meeting via SMS chatbot',
+        subheading: campaignRow?.name ? `Campaign: ${campaignRow.name}` : undefined,
+      });
+
       const crmService = new CRMService(db, new Map());
       const crmEvent = await crmService.emitEvent({
         workspace_id: conversation.workspace_id,
@@ -293,8 +315,8 @@ export default async (req: Request, _context: Context) =>
         external_contact_id: lead.external_contact_id,
         payload: {
           external_contact_id: lead.external_contact_id,
-          tag_name: 'booked',
-          note_body: 'Lead booked via SMS chatbot',
+          tag_name: mappedTag || null,
+          note_body: noteBody,
         },
       });
 

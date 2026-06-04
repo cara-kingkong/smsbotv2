@@ -24,7 +24,8 @@ interface ProcessSendSmsPayload {
  *
  * Responsibilities:
  *  - Resolve the outbound `from` number from the workspace inventory
- *    when the caller did not pin one (falls back to TWILIO_PHONE_NUMBER).
+ *    when the caller did not pin one. Flags the conversation for a human
+ *    if the workspace has no number matching the lead's country.
  *  - Enforce business hours for automated (AI/system) sends — reschedules
  *    the job for the next open window and pauses the conversation.
  *  - Dispatch the message via the provider adapter.
@@ -43,6 +44,18 @@ export default async (req: Request, _context: Context) =>
 
     if (!message) return new Response('Skipped — message not found', { status: 200 });
     if (message.provider_message_id) return new Response('Already sent', { status: 200 });
+
+    // Debug conversations: persist as sent but never dispatch via Twilio.
+    if ((conversation as { is_test?: boolean }).is_test) {
+      await context.db
+        .from('messages')
+        .update({
+          provider_status: 'test_skipped',
+          sent_at: new Date().toISOString(),
+        })
+        .eq('id', payload.message_id);
+      return new Response('Skipped — debug conversation', { status: 200 });
+    }
 
     // Business hours guard (human sends bypass).
     const guard = await checkSendAllowed({

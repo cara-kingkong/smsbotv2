@@ -13,7 +13,7 @@ export interface OnboardingState {
 export async function computeOnboardingState(workspaceId: string): Promise<OnboardingState> {
   const db = getServiceClient();
 
-  const [campaignResult, agentResult, smsResult, calendarResult] = await Promise.all([
+  const [campaignResult, agentResult, phoneNumberResult, calendarResult] = await Promise.all([
     db.from('campaigns').select('id').eq('workspace_id', workspaceId).limit(1),
     db
       .from('agents')
@@ -21,7 +21,7 @@ export async function computeOnboardingState(workspaceId: string): Promise<Onboa
       .eq('campaigns.workspace_id', workspaceId)
       .is('deleted_at', null)
       .limit(1),
-    db.from('integrations').select('id').eq('workspace_id', workspaceId).eq('type', 'sms').limit(1),
+    db.from('workspace_phone_numbers').select('id').eq('workspace_id', workspaceId).limit(1),
     db
       .from('integrations')
       .select('id')
@@ -32,13 +32,7 @@ export async function computeOnboardingState(workspaceId: string): Promise<Onboa
 
   const hasCampaign = (campaignResult.data?.length ?? 0) > 0;
   const hasAgent = (agentResult.data?.length ?? 0) > 0;
-  const hasSmsProviderInDb = (smsResult.data?.length ?? 0) > 0;
-  const hasSmsProviderInEnv = !!(
-    process.env.TWILIO_ACCOUNT_SID
-    && process.env.TWILIO_AUTH_TOKEN
-    && process.env.TWILIO_PHONE_NUMBER
-  );
-  const hasSmsProvider = hasSmsProviderInDb || hasSmsProviderInEnv;
+  const hasSmsProvider = (phoneNumberResult.data?.length ?? 0) > 0;
   const hasCalendar = (calendarResult.data?.length ?? 0) > 0;
 
   const booleans = [hasCampaign, hasAgent, hasSmsProvider, hasCalendar];

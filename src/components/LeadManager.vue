@@ -115,7 +115,7 @@
             </div>
 
             <div class="relative" ref="timezoneContainerRef">
-              <label class="form-label">Timezone</label>
+              <label class="form-label">Timezone *</label>
               <input
                 v-model="timezoneSearch"
                 type="text"
@@ -397,6 +397,12 @@ async function createLead() {
   if (!workspaceId) return;
   formError.value = '';
   formSuccess.value = '';
+
+  if (!form.value.timezone) {
+    formError.value = 'Please select the lead\'s timezone — it controls when they can be texted.';
+    return;
+  }
+
   formLoading.value = true;
 
   try {
@@ -409,7 +415,7 @@ async function createLead() {
         first_name: form.value.first_name,
         last_name: form.value.last_name || undefined,
         email: form.value.email || undefined,
-        timezone: form.value.timezone || undefined,
+        timezone: form.value.timezone,
         external_contact_id: form.value.external_contact_id || undefined,
         source_metadata: { source: 'manual_entry' },
       }),

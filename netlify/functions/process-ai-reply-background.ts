@@ -11,6 +11,7 @@ import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
 import { PhoneNumberService } from '../../src/lib/messaging/phone-numbers';
 import { OpenAIAdapter } from '../../src/lib/ai/adapters/openai';
 import { AnthropicAdapter } from '../../src/lib/ai/adapters/anthropic';
+import { providerForModel } from '../../src/lib/ai/models';
 import {
   ConversationStatus,
   ConversationOutcome,
@@ -18,13 +19,17 @@ import {
   CRMEventType,
   MessageDirection,
   ConversationEventType,
+  QualificationState,
 } from '../../src/lib/types';
 import { CRMService } from '../../src/lib/crm/service';
-import type { AIProviderAdapter, Calendar } from '../../src/lib/types';
+import { buildConversationNote } from '../../src/lib/crm/notes';
+import type { AIProviderAdapter, AIDecision, Calendar } from '../../src/lib/types';
 import { CalendlyAdapter } from '../../src/lib/calendar/adapters/calendly';
-import { isWithinBusinessHours, getNextBusinessHoursStart } from '../../src/lib/utils/business-hours';
+import { isWithinBusinessHours, getNextBusinessHoursStart, filterSlotsWithinBusinessHours } from '../../src/lib/utils/business-hours';
 import { evaluateStopConditions } from '../../src/lib/utils/stop-conditions';
+import { countConsecutiveFollowups } from '../../src/lib/utils/followups';
 import { detectBookingAcceptance } from '../../src/lib/utils/booking-guard';
+import { detectReaction } from '../../src/lib/utils/reaction';
 import { runQueueJob } from '../../src/lib/queues/job-runner';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 
@@ -107,25 +112,34 @@ export default async (req: Request, _context: Context) =>
     // Resolve the outbound "from" number for this lead. MUST match the
     // lead's country — we never send into a country the workspace hasn't
     // configured. No cross-country fallback, no env-var backdoor.
-    const resolvedNumber = await phoneNumbers.resolveForLead(conversation.workspace_id, lead.phone_e164);
-    if (!resolvedNumber) {
-      const leadCountry = parsePhoneNumberFromString(lead.phone_e164)?.country ?? null;
-      console.warn(
-        `Send blocked for conversation ${conversation_id}: no workspace number in country ${leadCountry ?? 'unknown'}`,
-      );
-      await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
-      await db.from('conversation_events').insert({
-        conversation_id,
-        event_type: 'send_blocked_no_number_for_country',
-        event_payload_json: {
-          workspace_id: conversation.workspace_id,
-          lead_phone: lead.phone_e164,
-          lead_country: leadCountry,
-        },
-      });
-      return new Response('No outbound number for lead country', { status: 200 });
+    //
+    // Debug conversations skip this guard: they never hit Twilio so the
+    // synthetic lead phone doesn't need a workspace number behind it.
+    const isTestConversation = (conversation as { is_test?: boolean }).is_test === true;
+    let fromNumber: string;
+    if (isTestConversation) {
+      fromNumber = 'debug';
+    } else {
+      const resolvedNumber = await phoneNumbers.resolveForLead(conversation.workspace_id, lead.phone_e164);
+      if (!resolvedNumber) {
+        const leadCountry = parsePhoneNumberFromString(lead.phone_e164)?.country ?? null;
+        console.warn(
+          `Send blocked for conversation ${conversation_id}: no workspace number in country ${leadCountry ?? 'unknown'}`,
+        );
+        await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
+        await db.from('conversation_events').insert({
+          conversation_id,
+          event_type: 'send_blocked_no_number_for_country',
+          event_payload_json: {
+            workspace_id: conversation.workspace_id,
+            lead_phone: lead.phone_e164,
+            lead_country: leadCountry,
+          },
+        });
+        return new Response('No outbound number for lead country', { status: 200 });
+      }
+      fromNumber = resolvedNumber.e164;
     }
-    const fromNumber = resolvedNumber.e164;
 
     const hasCampaignStopConditions = campaign.stop_conditions_json?.max_messages !== undefined
       && Object.keys(campaign.stop_conditions_json).length > 0;
@@ -173,7 +187,7 @@ export default async (req: Request, _context: Context) =>
     }
 
     const hasBusinessHours = effectiveBusinessHours?.schedule?.length > 0;
-    if (hasBusinessHours && !isWithinBusinessHours(effectiveBusinessHours, lead.timezone)) {
+    if (!isTestConversation && hasBusinessHours && !isWithinBusinessHours(effectiveBusinessHours, lead.timezone)) {
       const nextOpen = getNextBusinessHoursStart(effectiveBusinessHours, lead.timezone);
       if (nextOpen) {
         await queueService.enqueue({
@@ -191,6 +205,12 @@ export default async (req: Request, _context: Context) =>
     await heartbeat();
     const history = await messagingService.getHistory(conversation_id);
 
+    // Is the lead's latest inbound message an emoji reaction / tapback? If the
+    // AI then chooses not to reply, we treat that as intentional silence rather
+    // than escalating to a human (see the no-action handling further down).
+    const lastInbound = [...history].reverse().find((m) => m.direction === MessageDirection.Inbound);
+    const latestInboundReaction = lastInbound ? detectReaction(lastInbound.body_text) : null;
+
     const aiAdapters = new Map<string, AIProviderAdapter>();
     if (process.env.OPENAI_API_KEY) aiAdapters.set('openai', new OpenAIAdapter(process.env.OPENAI_API_KEY));
     if (process.env.ANTHROPIC_API_KEY) aiAdapters.set('anthropic', new AnthropicAdapter(process.env.ANTHROPIC_API_KEY));
@@ -199,10 +219,13 @@ export default async (req: Request, _context: Context) =>
     const bookingService = new BookingService(db, null as never);
     const calendars = await bookingService.getCalendarsForCampaign(conversation.campaign_id);
 
-    let providerKey = 'openai';
-    if (version.config_json && typeof version.config_json === 'object' && 'provider' in version.config_json) {
-      providerKey = version.config_json.provider as string;
-    }
+    // Resolve provider: prefer the one implied by the configured model, then the
+    // explicit provider key, then fall back to whichever adapter has credentials.
+    const config = (version.config_json ?? {}) as Record<string, unknown>;
+    const configuredModel = typeof config.model === 'string' && config.model ? config.model : '';
+    let providerKey = configuredModel
+      ? providerForModel(configuredModel)
+      : (typeof config.provider === 'string' ? config.provider : 'openai');
     if (!aiAdapters.has(providerKey)) {
       providerKey = aiAdapters.keys().next().value ?? 'openai';
     }
@@ -224,21 +247,85 @@ export default async (req: Request, _context: Context) =>
     const previouslyOfferedSlots = (priorSlotsEvent?.event_payload_json as Record<string, unknown>)?.slots as string[] | undefined;
 
     await heartbeat();
-    const decision = await aiService.generateReply({
-      agent_version: version,
-      conversation_history: history,
-      lead,
-      available_calendar_ids: calendars.map((c) => c.id),
-      available_calendars: calendars.map((c) => ({ id: c.id, name: c.name })),
-      available_slots: previouslyOfferedSlots,
-      provider_key: providerKey,
-    });
+
+    // ── First outbound message: use the agent's opening message ──
+    // When there's no history yet, this is the AI initiating the thread. If an
+    // opening message is configured, skip the full prompt + decision schema and
+    // send the (optionally cheaply-personalized) opener instead.
+    const openingTemplate = typeof config.opening_message === 'string' ? config.opening_message.trim() : '';
+    const openingModel = typeof config.opening_message_model === 'string' ? config.opening_message_model : 'static';
+    const useOpener = history.length === 0 && openingTemplate.length > 0;
+
+    // When this run was triggered by the follow-up cadence the lead has gone
+    // silent. Tell the AI so it sends a fresh nudge that builds on the thread
+    // instead of repeating its last message. number/total let it escalate tone
+    // toward a graceful final check-in. Cadence reads the ACTIVE version to match
+    // the rest of the follow-up logic (see the scheduling block below).
+    let followupContext: { number: number; total: number } | undefined;
+    if (trigger === 'followup_scheduled') {
+      const priorFollowups = await countConsecutiveFollowups(db, conversation_id);
+      const activeCadence = version.is_active
+        ? version.reply_cadence_json
+        : (await agentService.getActiveVersion(conversation.agent_id))?.reply_cadence_json
+          ?? version.reply_cadence_json;
+      followupContext = { number: priorFollowups + 1, total: activeCadence?.max_followups ?? 0 };
+    }
+
+    let decision: AIDecision;
+    let modelName: string;
+
+    if (useOpener) {
+      // Derive a short outreach-context hint from the lead's source metadata so
+      // prompt-style openers can pick the right conditional variant. Prefers an
+      // explicit context/scenario/reason key, else falls back to the raw payload.
+      const sourceMeta = (lead.source_json ?? {}) as Record<string, unknown>;
+      const explicitContext = ['context', 'scenario', 'reason', 'source']
+        .map((k) => sourceMeta[k])
+        .find((v): v is string => typeof v === 'string' && v.length > 0);
+      const openingContext = explicitContext
+        ?? (Object.keys(sourceMeta).length > 0 ? JSON.stringify(sourceMeta).slice(0, 500) : undefined);
+
+      const openingText = await aiService.generateOpeningMessage({
+        template: openingTemplate,
+        lead,
+        model: openingModel,
+        context: openingContext,
+      });
+      decision = {
+        should_reply: true,
+        reply_text: openingText,
+        qualification_state: QualificationState.Unknown,
+        should_offer_times: false,
+        offer_outside_business_hours: false,
+        should_book: false,
+        should_cancel_booking: false,
+        confirmed_time: null,
+        recommended_calendar_id: null,
+        escalate_to_human: false,
+        tags_to_emit: [],
+        confidence_notes: ['Opening message'],
+        reason_summary: 'Initial outbound opener',
+      };
+      modelName = openingModel === 'static' || !openingModel ? 'opening:static' : openingModel;
+    } else {
+      decision = await aiService.generateReply({
+        agent_version: version,
+        conversation_history: history,
+        lead,
+        available_calendar_ids: calendars.map((c) => c.id),
+        available_calendars: calendars.map((c) => ({ id: c.id, name: c.name })),
+        available_slots: previouslyOfferedSlots,
+        provider_key: providerKey,
+        followup: followupContext,
+      });
+      modelName = configuredModel || (providerKey === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o');
+    }
 
     await db.from('ai_decisions').insert({
       workspace_id: conversation.workspace_id,
       conversation_id,
       agent_version_id: version.id,
-      model_name: providerKey === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o',
+      model_name: modelName,
       input_json: {
         history_length: history.length,
         lead_timezone: lead.timezone,
@@ -280,13 +367,24 @@ export default async (req: Request, _context: Context) =>
     if (decision.should_offer_times && !decision.should_book && calendars.length > 0) {
       const slotsCalendar = calendars[0];
       const isReOffer = !!priorSlotsEvent;
-      const allSlots = await fetchAllCalendlySlots(db, slotsCalendar);
-      const offeredSlots = isReOffer
-        ? spreadSlots(allSlots, 3)
-        : pickInitialSlots(allSlots, lead.timezone);
+      const rawSlots = await fetchAllCalendlySlots(db, slotsCalendar);
+      // Guardrail: by default only offer slots within business hours (in the
+      // lead's timezone) so we never suggest 4am/midnight call times. When the
+      // lead has explicitly asked for an out-of-hours time, the AI sets
+      // offer_outside_business_hours and we open up the full availability and
+      // spread the offer across the day so early/late options surface.
+      const relaxHours = decision.offer_outside_business_hours === true;
+      const allSlots = relaxHours
+        ? rawSlots
+        : filterSlotsWithinBusinessHours(rawSlots, effectiveBusinessHours, lead.timezone);
+      const offeredSlots = relaxHours
+        ? spreadAcrossPool(allSlots, 3)
+        : isReOffer
+          ? spreadSlots(allSlots, 3)
+          : pickInitialSlots(allSlots, lead.timezone);
 
       if (offeredSlots.length > 0) {
-        const formatted = isReOffer
+        const formatted = (relaxHours || isReOffer)
           ? formatSlotsFallback(offeredSlots, lead.timezone)
           : formatSlotsInitial(offeredSlots, lead.timezone);
         const combinedReply = decision.reply_text
@@ -439,15 +537,32 @@ export default async (req: Request, _context: Context) =>
 
       await conversationService.updateStatus(conversation_id, ConversationStatus.WaitingForLead);
 
-      const cadence = version.reply_cadence_json;
-      if (cadence && cadence.max_followups > 0 && cadence.followup_delay_seconds > 0) {
-        const { count: followupCount } = await db
-          .from('conversation_events')
-          .select('*', { count: 'exact', head: true })
-          .eq('conversation_id', conversation_id)
-          .eq('event_type', ConversationEventType.AIReplyGenerated);
+      // Follow-up cadence tracks the agent's ACTIVE version (an operational
+      // setting), not the version pinned to this conversation — so edits to
+      // max_followups / followup_delay_seconds take effect on in-flight
+      // conversations. This matches the safety-net cron (process-followup-check),
+      // which also reads the active version. The pinned `version` still governs
+      // the AI's behaviour (prompt, rules, model). Falls back to the pinned
+      // cadence only if no active version can be resolved.
+      const cadenceVersion = version.is_active
+        ? version
+        : (await agentService.getActiveVersion(conversation.agent_id)) ?? version;
+      const cadence = cadenceVersion.reply_cadence_json;
+      if (!isTestConversation && cadence && cadence.max_followups > 0 && cadence.followup_delay_seconds > 0) {
+        // If this reply was itself triggered by a follow-up job, the lead was
+        // silent — record it explicitly so max_followups counts consecutive
+        // nudges to a silent lead, not genuine back-and-forth replies.
+        if (trigger === 'followup_scheduled') {
+          await db.from('conversation_events').insert({
+            conversation_id,
+            event_type: ConversationEventType.FollowupSent,
+            event_payload_json: { followup_delay_seconds: cadence.followup_delay_seconds },
+          });
+        }
 
-        if ((followupCount ?? 0) < cadence.max_followups) {
+        const followupCount = await countConsecutiveFollowups(db, conversation_id);
+
+        if (followupCount < cadence.max_followups) {
           const followupRunAt = new Date(Date.now() + cadence.followup_delay_seconds * 1000);
           await queueService.enqueue({
             workspace_id: conversation.workspace_id,
@@ -587,6 +702,31 @@ export default async (req: Request, _context: Context) =>
       return new Response('Needs human', { status: 200 });
     }
 
+    // Intentional silence on a reaction: when the lead's latest inbound is just
+    // an emoji reaction / tapback and the AI deliberately chose not to reply,
+    // stay quiet — don't escalate or send a "team is reviewing" message. Not
+    // replying to a 👍 is the natural, human behaviour.
+    if (
+      !tookAction &&
+      !bookingQueued &&
+      !decision.should_reply &&
+      !decision.escalate_to_human &&
+      latestInboundReaction
+    ) {
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: 'ai_skipped_reaction',
+        event_payload_json: {
+          reaction_kind: latestInboundReaction.kind,
+          reaction_description: latestInboundReaction.description,
+          qualification_state: decision.qualification_state,
+          reason_summary: decision.reason_summary,
+        },
+      });
+      await conversationService.updateStatus(conversation_id, ConversationStatus.WaitingForLead);
+      return new Response('Skipped reaction — no reply needed', { status: 200 });
+    }
+
     if (!tookAction && trigger === 'inbound_message') {
       await db.from('conversation_events').insert({
         conversation_id,
@@ -636,11 +776,21 @@ export default async (req: Request, _context: Context) =>
 
       if (crmIntegration) {
         const crmService = new CRMService(db, new Map());
-        const noteMap: Record<string, string> = {
-          [CRMEventType.ConversationQualified]: 'Lead qualified via SMS chatbot',
-          [CRMEventType.ConversationUnqualified]: 'Lead unqualified via SMS chatbot',
-          [CRMEventType.ConversationNeedsHuman]: 'Lead escalated to human via SMS chatbot',
+        const headlineMap: Record<string, string> = {
+          [CRMEventType.ConversationQualified]: 'Lead QUALIFIED via SMS chatbot',
+          [CRMEventType.ConversationUnqualified]: 'Lead UNQUALIFIED via SMS chatbot',
+          [CRMEventType.ConversationNeedsHuman]: 'Lead escalated to HUMAN via SMS chatbot',
         };
+
+        // Per-campaign tag mapping. Empty/missing entry means "skip tag apply",
+        // but the note still goes out.
+        const tagMappings = (campaign.crm_tag_mappings_json ?? {}) as Record<string, string>;
+        const mappedTag = (tagMappings[crmEventType] ?? '').toString().trim();
+
+        const noteBody = await buildConversationNote(db, conversation_id, {
+          headline: headlineMap[crmEventType],
+          subheading: `Campaign: ${campaign.name}`,
+        });
 
         const crmEvent = await crmService.emitEvent({
           workspace_id: conversation.workspace_id,
@@ -650,8 +800,8 @@ export default async (req: Request, _context: Context) =>
           external_contact_id: lead.external_contact_id,
           payload: {
             external_contact_id: lead.external_contact_id,
-            tag_name: crmEventType.replace('conversation_', ''),
-            note_body: noteMap[crmEventType],
+            tag_name: mappedTag || null,
+            note_body: noteBody,
           },
         });
 
@@ -814,6 +964,22 @@ function pickInitialSlots(allSlots: string[], leadTimezone?: string | null): str
   }
 
   return picked.length > 0 ? picked : spreadSlots(allSlots, 3);
+}
+
+/**
+ * Pick `count` slots sampled evenly across the whole pool (by index) rather than
+ * greedily from the front. Used when the lead has asked for out-of-hours times,
+ * so the offer spans a genuine range (early through late, across days) instead of
+ * dumping the earliest available slots. Input is assumed chronologically sorted.
+ */
+function spreadAcrossPool(allSlots: string[], count: number): string[] {
+  if (allSlots.length <= count) return allSlots;
+  const step = (allSlots.length - 1) / (count - 1);
+  const picked: string[] = [];
+  for (let i = 0; i < count; i++) {
+    picked.push(allSlots[Math.round(i * step)]);
+  }
+  return picked;
 }
 
 /** Fallback: pick slots spread at least 1 hour apart (for re-offers) */

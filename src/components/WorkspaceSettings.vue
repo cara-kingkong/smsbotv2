@@ -4,17 +4,13 @@
 
     <div v-else class="grid gap-6 xl:grid-cols-2">
       <fieldset class="panel space-y-5">
-        <legend class="form-label">Default Business Hours</legend>
+        <legend class="form-label">Default Sending Hours</legend>
         <p class="section-copy">
-          These hours apply to campaigns by default. Override them only when a campaign needs a different operating window.
+          The window when the AI is allowed to text a lead. Times are applied in
+          <strong>each lead's own timezone</strong> — so 09:00–17:00 means 9am–5pm wherever the lead is,
+          not your local time. Messages that fall outside this window are held and sent when the lead's
+          window next opens. Campaigns can override these defaults.
         </p>
-
-        <div>
-          <label class="form-label">Timezone</label>
-          <select v-model="form.timezone" class="select">
-            <option v-for="tz in timezoneOptions" :key="tz.value" :value="tz.value">{{ tz.label }}</option>
-          </select>
-        </div>
 
         <div>
           <label class="form-label">Active Days</label>
@@ -48,6 +44,17 @@
               <option v-for="t in timeOptions" :key="t" :value="t">{{ t }}</option>
             </select>
           </div>
+        </div>
+
+        <div class="border-t border-slate-200 pt-4">
+          <label class="form-label">Fallback timezone</label>
+          <p class="section-copy mb-2">
+            Used only when a lead's own timezone is unknown — for example, an inbound text from a new
+            number. Pick the region most of your leads are in.
+          </p>
+          <select v-model="form.timezone" class="select">
+            <option v-for="tz in timezoneOptions" :key="tz.value" :value="tz.value">{{ tz.label }}</option>
+          </select>
         </div>
       </fieldset>
 
@@ -112,7 +119,7 @@ const errorMsg = ref('');
 let workspaceId: string | null = null;
 
 const form = ref({
-  timezone: 'America/New_York',
+  timezone: 'Australia/Melbourne',
   activeDays: [1, 2, 3, 4, 5] as number[],
   startTime: '09:00',
   endTime: '17:00',
@@ -159,7 +166,7 @@ async function loadSettings() {
     const sc = data.stop_conditions_json;
 
     if (bh?.schedule?.length) {
-      form.value.timezone = bh.timezone ?? 'America/New_York';
+      form.value.timezone = bh.timezone ?? 'Australia/Melbourne';
       form.value.activeDays = bh.schedule.map((s: { day: number }) => s.day);
       form.value.startTime = bh.schedule[0]?.start ?? '09:00';
       form.value.endTime = bh.schedule[0]?.end ?? '17:00';

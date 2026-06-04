@@ -137,14 +137,32 @@
     background: var(--surface-muted);
   }
 
-  .topbar-link-signout {
-    @apply text-xs font-semibold uppercase tracking-[0.12em];
-    color: var(--text-muted);
+  .topbar-btn {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium transition duration-150;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
   }
 
-  .topbar-link-signout:hover {
+  .topbar-btn:hover {
     color: var(--text-strong);
-    background: transparent;
+    background: var(--surface-muted);
+  }
+
+  .topbar-btn-active {
+    color: var(--text-strong);
+    background: var(--surface-muted);
+  }
+
+  .topbar-btn-icon {
+    @apply h-4 w-4 shrink-0;
+  }
+
+  .topbar-btn-signout:hover {
+    color: var(--danger, #dc2626);
+    border-color: var(--danger, #dc2626);
+    background: var(--surface);
   }
 
   .topbar-divider {

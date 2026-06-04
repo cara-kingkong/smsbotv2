@@ -2,6 +2,7 @@ import type { Config, Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { QueueService } from '../../src/lib/queues/service';
 import { JobStatus } from '../../src/lib/types';
+import { countConsecutiveFollowups } from '../../src/lib/utils/followups';
 
 export const config: Config = {
   schedule: '*/5 * * * *',
@@ -78,14 +79,11 @@ export default async (_req: Request, _context: Context) => {
         continue; // Not yet time for a follow-up
       }
 
-      // Count existing AI replies to enforce max_followups
-      const { count: replyCount } = await db
-        .from('conversation_events')
-        .select('*', { count: 'exact', head: true })
-        .eq('conversation_id', conv.id)
-        .eq('event_type', 'ai_reply_generated');
+      // Count consecutive follow-ups since the lead's last inbound to enforce
+      // max_followups (nudges to a silent lead, not genuine back-and-forth).
+      const followupCount = await countConsecutiveFollowups(db, conv.id);
 
-      if ((replyCount ?? 0) >= cadence.max_followups) {
+      if (followupCount >= cadence.max_followups) {
         continue; // Already hit the limit
       }
 

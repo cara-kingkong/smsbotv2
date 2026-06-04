@@ -163,7 +163,7 @@
               :disabled="calendarToggling === cal.id"
               @change="toggleCalendarAssignment(cal.id, ($event.target as HTMLInputElement).checked)"
             />
-            <span class="font-medium text-slate-800">{{ cal.name }}</span>
+            <span class="font-medium text-slate-800">{{ calendarLabel(cal) }}</span>
             <span v-if="cal.booking_url" class="text-xs text-slate-400 truncate max-w-xs">{{ cal.booking_url }}</span>
           </label>
         </div>
@@ -291,6 +291,28 @@
             </div>
           </template>
         </fieldset>
+
+        <fieldset class="panel-muted space-y-4">
+          <legend class="form-label">CRM Tag Mapping</legend>
+          <p class="text-xs text-slate-500">
+            When a lead reaches one of these states the corresponding tag is applied to
+            their CRM contact (in addition to a note). Paste the provider-specific tag ID
+            (e.g. the numeric Keap tag ID). Leave blank to skip the tag for that event;
+            a note will still be created.
+          </p>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div v-for="row in crmTagRows" :key="row.eventType">
+              <label class="form-label">{{ row.label }}</label>
+              <input
+                v-model="detail.crmTagMappings[row.eventType]"
+                type="text"
+                :placeholder="row.placeholder"
+                class="input"
+              />
+              <p class="mt-1 text-[11px] text-slate-400">{{ row.help }}</p>
+            </div>
+          </div>
+        </fieldset>
       </div>
     </div>
   </div>
@@ -311,9 +333,35 @@ interface CampaignRecord {
   status: string;
   business_hours_json: { timezone: string; schedule: { day: number; start: string; end: string }[] } | null;
   stop_conditions_json: { max_messages: number; max_days: number; max_no_reply_hours: number } | null;
+  crm_tag_mappings_json: Record<string, string> | null;
   agents?: AgentRecord[];
   created_at: string;
   updated_at: string;
+}
+
+type CRMEventKey =
+  | 'conversation_qualified'
+  | 'conversation_unqualified'
+  | 'conversation_needs_human'
+  | 'conversation_booked'
+  | 'conversation_opted_out';
+
+const crmTagRows: { eventType: CRMEventKey; label: string; placeholder: string; help: string }[] = [
+  { eventType: 'conversation_qualified', label: 'Qualified', placeholder: 'e.g. 1234', help: 'Applied when the AI marks the lead qualified.' },
+  { eventType: 'conversation_unqualified', label: 'Unqualified', placeholder: 'e.g. 1235', help: 'Applied when the AI marks the lead unqualified.' },
+  { eventType: 'conversation_needs_human', label: 'Needs Human', placeholder: 'e.g. 1236', help: 'Applied when the AI escalates to a human.' },
+  { eventType: 'conversation_booked', label: 'Booked', placeholder: 'e.g. 1237', help: 'Applied when a booking succeeds.' },
+  { eventType: 'conversation_opted_out', label: 'Opted Out', placeholder: 'e.g. 1238', help: 'Applied when the lead replies STOP.' },
+];
+
+function emptyTagMappings(): Record<CRMEventKey, string> {
+  return {
+    conversation_qualified: '',
+    conversation_unqualified: '',
+    conversation_needs_human: '',
+    conversation_booked: '',
+    conversation_opted_out: '',
+  };
 }
 
 interface AgentRecord {
@@ -371,6 +419,7 @@ const detail = ref({
   maxMessages: 50,
   maxDays: 14,
   maxNoReplyHours: 72,
+  crmTagMappings: emptyTagMappings(),
 });
 
 const saving = ref(false);
@@ -383,6 +432,12 @@ interface CalendarRecord {
   name: string;
   booking_url?: string | null;
   status?: string;
+  settings_json?: Record<string, unknown>;
+}
+
+function calendarLabel(cal: CalendarRecord): string {
+  const label = cal.settings_json?.label;
+  return typeof label === 'string' && label ? label : cal.name;
 }
 
 const workspaceCalendars = ref<CalendarRecord[]>([]);
@@ -430,6 +485,12 @@ async function fetchCampaign() {
     const businessHours = data.business_hours_json;
     const stopConditions = data.stop_conditions_json;
 
+    const savedTagMappings = (data.crm_tag_mappings_json ?? {}) as Record<string, string>;
+    const tagMappings = emptyTagMappings();
+    for (const row of crmTagRows) {
+      tagMappings[row.eventType] = savedTagMappings[row.eventType] ?? '';
+    }
+
     detail.value = {
       name: data.name,
       status: data.status,
@@ -442,6 +503,7 @@ async function fetchCampaign() {
       maxMessages: stopConditions?.max_messages ?? 50,
       maxDays: stopConditions?.max_days ?? 14,
       maxNoReplyHours: stopConditions?.max_no_reply_hours ?? 72,
+      crmTagMappings: tagMappings,
     };
 
     campaignAgents.value = data.agents ?? [];
@@ -496,6 +558,11 @@ async function saveCampaign() {
               max_no_reply_hours: detail.value.maxNoReplyHours,
             }
           : {},
+        crm_tag_mappings_json: Object.fromEntries(
+          Object.entries(detail.value.crmTagMappings)
+            .map(([k, v]) => [k, (v ?? '').toString().trim()])
+            .filter(([, v]) => v.length > 0),
+        ),
       }),
     });
 

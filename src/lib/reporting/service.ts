@@ -71,6 +71,7 @@ export class ReportingService {
       .from('conversations')
       .select('status, outcome')
       .eq('workspace_id', workspaceId)
+      .eq('is_test', false)
       .is('deleted_at', null);
 
     if (error) throw new Error(`Failed to get metrics: ${error.message}`);
@@ -91,6 +92,7 @@ export class ReportingService {
         .from('conversations')
         .select('status, outcome, campaign_id, agent_id')
         .eq('workspace_id', workspaceId)
+        .eq('is_test', false)
         .is('deleted_at', null),
       this.db
         .from('campaigns')
@@ -193,6 +195,7 @@ export class ReportingService {
         .from('conversations')
         .select('id, status, outcome, agent_id')
         .eq('campaign_id', campaignId)
+        .eq('is_test', false)
         .is('deleted_at', null),
       this.db
         .from('agents')

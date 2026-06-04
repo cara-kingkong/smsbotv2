@@ -22,13 +22,19 @@ export default async (req: Request, _context: Context) => {
       twilio: {
         account_sid: !!process.env.TWILIO_ACCOUNT_SID,
         auth_token: !!process.env.TWILIO_AUTH_TOKEN,
-        phone_number: !!process.env.TWILIO_PHONE_NUMBER,
-        configured: !!(
-          process.env.TWILIO_ACCOUNT_SID
-          && process.env.TWILIO_AUTH_TOKEN
-          && process.env.TWILIO_PHONE_NUMBER
-        ),
+        configured: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
       },
+      openai: {
+        configured: !!process.env.OPENAI_API_KEY,
+      },
+      anthropic: {
+        configured: !!process.env.ANTHROPIC_API_KEY,
+      },
+      calendly: {
+        configured: !!process.env.CALENDLY_API_KEY,
+      },
+      // Keap credentials live on the integration row (workspace settings),
+      // not in env vars — so this endpoint no longer reports a Keap status.
     };
 
     return new Response(JSON.stringify(status), {

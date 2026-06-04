@@ -1,4 +1,14 @@
 import { z } from 'zod';
+import { isValidTimezone } from './timezones';
+
+/**
+ * IANA timezone, required. A lead's local timezone drives every business-hours
+ * decision, so it must be present and a canonical zone the runtime understands
+ * (e.g. "Australia/Melbourne") — not an abbreviation like "EST".
+ */
+export const leadTimezoneSchema = z
+  .string()
+  .refine(isValidTimezone, { message: 'Lead timezone must be a valid IANA timezone (e.g. "Australia/Melbourne")' });
 
 /** Start conversation webhook payload schema */
 export const startConversationSchema = z.object({
@@ -10,7 +20,7 @@ export const startConversationSchema = z.object({
     first_name: z.string().min(1),
     last_name: z.string().optional(),
     email: z.string().email().optional(),
-    timezone: z.string().optional(),
+    timezone: leadTimezoneSchema,
     external_contact_id: z.string().optional(),
     tags: z.array(z.string()).optional(),
     custom_fields: z.record(z.unknown()).optional(),

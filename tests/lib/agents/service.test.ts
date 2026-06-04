@@ -52,78 +52,12 @@ function makeVersion(overrides: Partial<AgentVersion> = {}): AgentVersion {
 
 describe('AgentService', () => {
   describe('selectForConversation', () => {
-    it('returns a weighted random agent with its active version', async () => {
-      const agents = [
-        makeAgent({ id: 'a1', weight: 70 }),
-        makeAgent({ id: 'a2', weight: 30 }),
-      ];
-      const version = makeVersion({ agent_id: 'a1' });
-
-      const db = {
-        from: vi.fn().mockImplementation((_table: string) => {
-          if (_table === 'agents') {
-            // Chain: .select().eq().is().eq() — all must return this
-            const agentChain = {
-              select: vi.fn().mockReturnThis(),
-              eq: vi.fn().mockImplementation(() => {
-                // Final .eq() resolves the promise
-                return Promise.resolve({ data: agents, error: null });
-              }),
-              is: vi.fn().mockReturnThis(),
-            };
-            // Override: the first .eq() call must returnThis (for campaign_id),
-            // but the last .eq() (after .is()) resolves. Use call counting.
-            let eqCalls = 0;
-            agentChain.eq = vi.fn().mockImplementation(() => {
-              eqCalls++;
-              if (eqCalls < 2) return agentChain; // campaign_id eq
-              return Promise.resolve({ data: agents, error: null }); // status eq
-            });
-            return agentChain;
-          }
-          // agent_versions
-          return {
-            select: vi.fn().mockReturnThis(),
-            eq: vi.fn().mockReturnThis(),
-            order: vi.fn().mockReturnThis(),
-            limit: vi.fn().mockReturnThis(),
-            single: vi.fn().mockResolvedValue({ data: version, error: null }),
-          };
-        }),
-      };
-
-      const service = new AgentService(db as any);
-      const result = await service.selectForConversation('camp-1');
-
-      expect(result.agent).toBeDefined();
-      expect(result.version).toBeDefined();
-      expect(['a1', 'a2']).toContain(result.agent.id);
-      expect(result.version.is_active).toBe(true);
-    });
-
-    it('throws when no active agents exist for campaign', async () => {
-      const agentChain: Record<string, any> = {
-        select: vi.fn().mockReturnThis(),
-        is: vi.fn().mockReturnThis(),
-      };
-      let eqCalls = 0;
-      agentChain.eq = vi.fn().mockImplementation(() => {
-        eqCalls++;
-        if (eqCalls < 2) return agentChain;
-        return Promise.resolve({ data: [], error: null });
-      });
-      const db = { from: vi.fn().mockReturnValue(agentChain) };
-
-      const service = new AgentService(db as any);
-      await expect(service.selectForConversation('camp-1')).rejects.toThrow('No active agents');
-    });
-
-    it('throws when selected agent has no active version', async () => {
-      const agents = [makeAgent({ id: 'a1', weight: 1 })];
-
-      const db = {
-        from: vi.fn().mockImplementation((_table: string) => {
-          if (_table === 'agents') {
+    // Builds a db mock where the `agents` query resolves to `agents` and the
+    // `agent_versions` query (.select().in().eq()) resolves to `versions`.
+    function buildDb(agents: Agent[], versions: AgentVersion[]) {
+      return {
+        from: vi.fn().mockImplementation((table: string) => {
+          if (table === 'agents') {
             const agentChain: Record<string, any> = {
               select: vi.fn().mockReturnThis(),
               is: vi.fn().mockReturnThis(),
@@ -131,23 +65,67 @@ describe('AgentService', () => {
             let eqCalls = 0;
             agentChain.eq = vi.fn().mockImplementation(() => {
               eqCalls++;
-              if (eqCalls < 2) return agentChain;
-              return Promise.resolve({ data: agents, error: null });
+              if (eqCalls < 2) return agentChain; // campaign_id eq → chainable
+              return Promise.resolve({ data: agents, error: null }); // status eq → resolves
             });
             return agentChain;
           }
-          return {
+          // agent_versions: .select().in().eq() resolves the list
+          const versionChain: Record<string, any> = {
             select: vi.fn().mockReturnThis(),
-            eq: vi.fn().mockReturnThis(),
-            order: vi.fn().mockReturnThis(),
-            limit: vi.fn().mockReturnThis(),
-            single: vi.fn().mockResolvedValue({ data: null, error: { message: 'not found' } }),
+            in: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockResolvedValue({ data: versions, error: null }),
           };
+          return versionChain;
         }),
       };
+    }
 
-      const service = new AgentService(db as any);
-      await expect(service.selectForConversation('camp-1')).rejects.toThrow('No active version');
+    it('returns a weighted random agent with its active version', async () => {
+      const agents = [
+        makeAgent({ id: 'a1', weight: 70 }),
+        makeAgent({ id: 'a2', weight: 30 }),
+      ];
+      const versions = [
+        makeVersion({ id: 'av-a1', agent_id: 'a1' }),
+        makeVersion({ id: 'av-a2', agent_id: 'a2' }),
+      ];
+
+      const service = new AgentService(buildDb(agents, versions) as any);
+      const result = await service.selectForConversation('camp-1');
+
+      expect(result.agent).toBeDefined();
+      expect(result.version).toBeDefined();
+      expect(['a1', 'a2']).toContain(result.agent.id);
+      expect(result.version.agent_id).toBe(result.agent.id);
+      expect(result.version.is_active).toBe(true);
+    });
+
+    it('skips promptless agents and selects one that has a published version', async () => {
+      const agents = [
+        makeAgent({ id: 'a1', weight: 90 }), // no version → must be skipped
+        makeAgent({ id: 'a2', weight: 10 }),
+      ];
+      const versions = [makeVersion({ id: 'av-a2', agent_id: 'a2' })];
+
+      const service = new AgentService(buildDb(agents, versions) as any);
+      const result = await service.selectForConversation('camp-1');
+
+      expect(result.agent.id).toBe('a2');
+      expect(result.version.agent_id).toBe('a2');
+    });
+
+    it('throws when no active agents exist for campaign', async () => {
+      const service = new AgentService(buildDb([], []) as any);
+      await expect(service.selectForConversation('camp-1')).rejects.toThrow('No active agents');
+    });
+
+    it('throws when no active agent has a published prompt version', async () => {
+      const agents = [makeAgent({ id: 'a1', weight: 1 })];
+      const service = new AgentService(buildDb(agents, []) as any);
+      await expect(service.selectForConversation('camp-1')).rejects.toThrow(
+        'No active agents with a published prompt version',
+      );
     });
   });
 
