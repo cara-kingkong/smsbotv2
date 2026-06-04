@@ -156,7 +156,7 @@
                 <div>
                   <label class="form-label">Model</label>
                   <select v-model="versionForm.model" class="select">
-                    <option value="">Default</option>
+                    <option value="">Default ({{ defaultModelLabel }})</option>
                     <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.label }}</option>
                   </select>
                   <p v-if="availableProviders && availableModels.length === 0" class="form-help">
@@ -310,7 +310,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { getSessionContext } from '@lib/config/public-client';
-import { AI_MODELS, providerForModel, type AIProviderKey } from '@lib/ai/models';
+import { AI_MODELS, DEFAULT_MODEL_BY_PROVIDER, providerForModel, type AIProviderKey } from '@lib/ai/models';
 
 const props = defineProps<{ agentId: string }>();
 
@@ -411,6 +411,15 @@ const availableModels = computed(() => {
     list.push({ id: selected, label: `${selected} (unavailable)`, provider: providerForModel(selected) });
   }
   return list;
+});
+
+/** Human-readable model that the "Default" option resolves to at reply time.
+ *  Mirrors the backend's resolution: prefer OpenAI, else whichever provider has
+ *  credentials (falls back to OpenAI when provider status is still unknown). */
+const defaultModelLabel = computed(() => {
+  const provider = (['openai', 'anthropic'] as AIProviderKey[]).find(providerAvailable) ?? 'openai';
+  const id = DEFAULT_MODEL_BY_PROVIDER[provider];
+  return AI_MODELS.find((m) => m.id === id)?.label ?? id;
 });
 
 /** Cheap models for the opening-message selector, filtered to configured providers. */

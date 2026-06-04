@@ -18,6 +18,8 @@ export class AIService {
     available_calendars?: Array<{ id: string; name: string }>;
     available_slots?: string[];
     provider_key: string;
+    /** Set when triggered by the follow-up cadence (lead has gone silent). */
+    followup?: { number: number; total: number };
   }): Promise<AIDecision> {
     const adapter = this.providerAdapters.get(input.provider_key);
     if (!adapter) throw new Error(`No AI adapter for provider: ${input.provider_key}`);
@@ -43,6 +45,7 @@ export class AIService {
       available_calendar_ids: input.available_calendar_ids,
       available_calendars: input.available_calendars ?? input.available_calendar_ids.map((id) => ({ id, name: id })),
       available_slots: input.available_slots,
+      followup: input.followup,
     };
 
     // Flag when the lead's latest inbound is an emoji reaction / tapback so the

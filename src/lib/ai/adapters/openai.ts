@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import type { AIProviderAdapter, AIPromptContext, AIDecision, OpeningMessageContext } from '@lib/types';
 import { QualificationState } from '@lib/types';
 import { reactionPromptNote } from '@lib/utils/reaction';
+import { followupPromptNote, FOLLOWUP_USER_TURN } from '@lib/utils/followups';
 
 const DEFAULT_OPENING_MODEL = 'gpt-4o-mini';
 
@@ -123,6 +124,7 @@ export class OpenAIAdapter implements AIProviderAdapter {
           context.lead.timezone ? `Timezone: ${context.lead.timezone}` : '',
           '',
           context.latest_inbound_reaction ? reactionPromptNote(context.latest_inbound_reaction) + '\n' : '',
+          context.followup ? followupPromptNote(context.followup) + '\n' : '',
           DECISION_SCHEMA,
         ].join('\n'),
       },
@@ -134,6 +136,13 @@ export class OpenAIAdapter implements AIProviderAdapter {
         role: msg.direction === 'inbound' ? 'user' : 'assistant',
         content: msg.body_text,
       });
+    }
+
+    // On a follow-up the transcript ends on the AI's own (assistant) message, so
+    // append a synthetic user turn — otherwise the model just continues / repeats
+    // itself.
+    if (context.followup && messages[messages.length - 1]?.role === 'assistant') {
+      messages.push({ role: 'user', content: FOLLOWUP_USER_TURN });
     }
 
     const completion = await this.client.chat.completions.create({

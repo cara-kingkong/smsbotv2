@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { AIProviderAdapter, AIPromptContext, AIDecision, OpeningMessageContext } from '@lib/types';
 import { QualificationState } from '@lib/types';
 import { reactionPromptNote } from '@lib/utils/reaction';
+import { followupPromptNote, FOLLOWUP_USER_TURN } from '@lib/utils/followups';
 
 const DEFAULT_OPENING_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -122,6 +123,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
       context.lead.timezone ? `Timezone: ${context.lead.timezone}` : '',
       '',
       context.latest_inbound_reaction ? reactionPromptNote(context.latest_inbound_reaction) + '\n' : '',
+      context.followup ? followupPromptNote(context.followup) + '\n' : '',
       DECISION_SCHEMA,
     ].join('\n');
 
@@ -133,6 +135,13 @@ export class AnthropicAdapter implements AIProviderAdapter {
     // Ensure messages alternate and start with user
     if (messages.length === 0 || messages[0].role !== 'user') {
       messages.unshift({ role: 'user', content: '[Conversation started]' });
+    }
+
+    // On a follow-up the transcript ends on the AI's own (assistant) message, so
+    // append a synthetic user turn — otherwise the model just continues / repeats
+    // itself. Guarded so we never produce two consecutive user turns.
+    if (context.followup && messages[messages.length - 1]?.role === 'assistant') {
+      messages.push({ role: 'user', content: FOLLOWUP_USER_TURN });
     }
 
     const response = await this.client.messages.create({

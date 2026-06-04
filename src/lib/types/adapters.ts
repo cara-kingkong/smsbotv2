@@ -49,6 +49,14 @@ export interface AIPromptContext {
    * whether a reply is natural — usually it isn't.
    */
   latest_inbound_reaction?: { kind: 'tapback' | 'emoji'; description: string };
+  /**
+   * Set when this generation was triggered by the follow-up cadence (the lead
+   * has gone silent), not by an inbound message. `number` is which consecutive
+   * nudge this is (1-based) and `total` is the configured max_followups, so the
+   * model can escalate tone from a gentle nudge to a graceful final check-in and
+   * — crucially — knows NOT to just repeat its previous message.
+   */
+  followup?: { number: number; total: number };
 }
 
 export interface OpeningMessageContext {

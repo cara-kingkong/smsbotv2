@@ -256,6 +256,21 @@ export default async (req: Request, _context: Context) =>
     const openingModel = typeof config.opening_message_model === 'string' ? config.opening_message_model : 'static';
     const useOpener = history.length === 0 && openingTemplate.length > 0;
 
+    // When this run was triggered by the follow-up cadence the lead has gone
+    // silent. Tell the AI so it sends a fresh nudge that builds on the thread
+    // instead of repeating its last message. number/total let it escalate tone
+    // toward a graceful final check-in. Cadence reads the ACTIVE version to match
+    // the rest of the follow-up logic (see the scheduling block below).
+    let followupContext: { number: number; total: number } | undefined;
+    if (trigger === 'followup_scheduled') {
+      const priorFollowups = await countConsecutiveFollowups(db, conversation_id);
+      const activeCadence = version.is_active
+        ? version.reply_cadence_json
+        : (await agentService.getActiveVersion(conversation.agent_id))?.reply_cadence_json
+          ?? version.reply_cadence_json;
+      followupContext = { number: priorFollowups + 1, total: activeCadence?.max_followups ?? 0 };
+    }
+
     let decision: AIDecision;
     let modelName: string;
 
@@ -301,6 +316,7 @@ export default async (req: Request, _context: Context) =>
         available_calendars: calendars.map((c) => ({ id: c.id, name: c.name })),
         available_slots: previouslyOfferedSlots,
         provider_key: providerKey,
+        followup: followupContext,
       });
       modelName = configuredModel || (providerKey === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o');
     }
