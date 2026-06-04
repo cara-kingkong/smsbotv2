@@ -33,9 +33,6 @@
       </ul>
     </div>
   </div>
-  <div v-else-if="activeName" class="topbar-link pointer-events-none opacity-80">
-    {{ activeName }}
-  </div>
 </template>
 
 <script setup lang="ts">
