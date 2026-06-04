@@ -39,7 +39,6 @@ export interface AIPromptContext {
   available_calendar_ids: string[];
   available_calendars: Array<{ id: string; name: string }>;
   available_slots?: string[];
-  rules: Record<string, unknown>;
   /** Model id from the agent's config_json. Adapter falls back to its default when unset. */
   model?: string;
   /** Sampling temperature from the agent's config_json. */

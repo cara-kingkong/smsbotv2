@@ -43,7 +43,6 @@ export class AIService {
       available_calendar_ids: input.available_calendar_ids,
       available_calendars: input.available_calendars ?? input.available_calendar_ids.map((id) => ({ id, name: id })),
       available_slots: input.available_slots,
-      rules: input.agent_version.system_rules_json,
     };
 
     // Flag when the lead's latest inbound is an emoji reaction / tapback so the

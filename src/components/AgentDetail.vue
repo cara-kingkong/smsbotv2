@@ -141,15 +141,33 @@
               No prompt version is active yet. Fill out the settings below and save to publish the first version.
             </div>
 
-            <div class="panel-muted">
-              <label class="form-label">Prompt Text *</label>
-              <textarea
-                v-model="versionForm.prompt_text"
-                rows="6"
-                placeholder="You are a helpful sales assistant who qualifies leads..."
-                class="input font-mono text-sm"
-              ></textarea>
-              <p class="form-help">The main guidance prompt sent to the AI for each conversation turn.</p>
+            <div class="panel-muted space-y-4">
+              <div>
+                <label class="form-label">Prompt Text *</label>
+                <textarea
+                  v-model="versionForm.prompt_text"
+                  rows="6"
+                  placeholder="You are a helpful sales assistant who qualifies leads..."
+                  class="input font-mono text-sm"
+                ></textarea>
+                <p class="form-help">The main guidance prompt sent to the AI for each conversation turn.</p>
+              </div>
+              <div class="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label class="form-label">Model</label>
+                  <select v-model="versionForm.model" class="select">
+                    <option value="">Default</option>
+                    <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+                  </select>
+                  <p v-if="availableProviders && availableModels.length === 0" class="form-help">
+                    No AI providers are configured. Add an OpenAI or Anthropic API key in workspace settings.
+                  </p>
+                </div>
+                <div>
+                  <label class="form-label">Temperature</label>
+                  <input v-model.number="versionForm.temperature" type="number" min="0" max="2" step="0.1" class="input" />
+                </div>
+              </div>
             </div>
 
             <div class="panel-muted space-y-4">
@@ -179,106 +197,22 @@
               </div>
             </div>
 
-            <div class="grid gap-4 lg:grid-cols-2">
-              <fieldset class="panel-muted space-y-4">
-                <legend class="form-label">System Rules</legend>
-                <div class="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <label class="form-label">Tone</label>
-                    <select v-model="versionForm.tone" class="select">
-                      <option value="friendly">Friendly</option>
-                      <option value="professional">Professional</option>
-                      <option value="casual">Casual</option>
-                      <option value="formal">Formal</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label class="form-label">Max Message Length</label>
-                    <input v-model.number="versionForm.max_message_length" type="number" min="50" max="1600" class="input" />
-                  </div>
-                </div>
-              </fieldset>
-
-              <fieldset class="panel-muted space-y-4">
-                <legend class="form-label">Reply Cadence</legend>
-                <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  <div>
-                    <label class="form-label">Reply Delay (s)</label>
-                    <input v-model.number="versionForm.reply_delay_seconds" type="number" min="0" class="input" />
-                    <p class="mt-1 text-xs text-slate-500">Wait before replying; resets if another message arrives</p>
-                  </div>
-                  <div>
-                    <label class="form-label">Followup Delay (s)</label>
-                    <input v-model.number="versionForm.followup_delay_seconds" type="number" min="0" class="input" />
-                  </div>
-                  <div>
-                    <label class="form-label">Max Followups</label>
-                    <input v-model.number="versionForm.max_followups" type="number" min="0" class="input" />
-                  </div>
-                </div>
-              </fieldset>
-            </div>
-
-            <div class="grid gap-4 lg:grid-cols-2">
-              <fieldset class="panel-muted space-y-4">
-                <legend class="form-label">Allowed Actions</legend>
-                <label class="flex items-center gap-3 text-sm text-slate-700">
-                  <input v-model="versionForm.can_book" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500" />
-                  Can book appointments
-                </label>
-                <label class="flex items-center gap-3 text-sm text-slate-700">
-                  <input v-model="versionForm.can_escalate_to_human" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500" />
-                  Can escalate to a human
-                </label>
-                <label class="flex items-center gap-3 text-sm text-slate-700">
-                  <input v-model="versionForm.can_close_unqualified" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500" />
-                  Can close unqualified leads
-                </label>
-              </fieldset>
-
-              <fieldset class="panel-muted space-y-4">
-                <legend class="form-label">AI Configuration</legend>
-                <div class="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <label class="form-label">Model</label>
-                    <select v-model="versionForm.model" class="select">
-                      <option value="">Default</option>
-                      <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.label }}</option>
-                    </select>
-                    <p v-if="availableProviders && availableModels.length === 0" class="form-help">
-                      No AI providers are configured. Add an OpenAI or Anthropic API key in workspace settings.
-                    </p>
-                  </div>
-                  <div>
-                    <label class="form-label">Temperature</label>
-                    <input v-model.number="versionForm.temperature" type="number" min="0" max="2" step="0.1" class="input" />
-                  </div>
-                </div>
-              </fieldset>
-            </div>
-
             <fieldset class="panel-muted space-y-4">
-              <legend class="form-label">Qualification Rules</legend>
-              <div class="flex flex-wrap gap-2">
-                <span
-                  v-for="(field, index) in versionForm.required_fields"
-                  :key="`${field}-${index}`"
-                  class="inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium text-slate-700"
-                  style="border-color: rgba(17,17,17,0.08); background: rgba(255,255,255,0.92);"
-                >
-                  {{ field }}
-                  <button type="button" class="ml-1 text-slate-400 hover:text-red-500" @click="versionForm.required_fields.splice(index, 1)">&times;</button>
-                </span>
-              </div>
-              <div class="flex gap-2">
-                <input
-                  v-model="newRequiredField"
-                  type="text"
-                  placeholder="e.g. budget, timeline"
-                  class="input flex-1"
-                  @keydown.enter.prevent="addRequiredField"
-                />
-                <button type="button" class="button-secondary" @click="addRequiredField">Add</button>
+              <legend class="form-label">Reply Cadence</legend>
+              <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div>
+                  <label class="form-label">Reply Delay (s)</label>
+                  <input v-model.number="versionForm.reply_delay_seconds" type="number" min="0" class="input" />
+                  <p class="mt-1 text-xs text-slate-500">Wait before replying; resets if another message arrives</p>
+                </div>
+                <div>
+                  <label class="form-label">Followup Delay (s)</label>
+                  <input v-model.number="versionForm.followup_delay_seconds" type="number" min="0" class="input" />
+                </div>
+                <div>
+                  <label class="form-label">Max Followups</label>
+                  <input v-model.number="versionForm.max_followups" type="number" min="0" class="input" />
+                </div>
               </div>
             </fieldset>
           </section>
@@ -367,17 +301,6 @@
               </div>
             </div>
           </section>
-
-          <section v-if="versionForm.can_book" class="panel-muted space-y-4">
-            <div>
-              <div class="page-kicker">Booking</div>
-              <h2 class="section-title mt-3">Calendar Assignments</h2>
-              <p class="section-copy mt-2">Calendars are now assigned at the campaign level.</p>
-            </div>
-            <div class="note-box text-xs">
-              Manage calendar assignments from the <a :href="agent?.campaign_id ? `/campaigns/${agent.campaign_id}` : '/campaigns'" class="text-teal-700 hover:text-teal-800 font-medium">Campaign detail page</a>.
-            </div>
-          </section>
         </aside>
       </div>
     </div>
@@ -424,15 +347,9 @@ interface PromptFields {
   prompt_text: string;
   opening_message: string;
   opening_message_model: string;
-  tone: string;
-  max_message_length: number;
   reply_delay_seconds: number;
   followup_delay_seconds: number;
   max_followups: number;
-  can_book: boolean;
-  can_escalate_to_human: boolean;
-  can_close_unqualified: boolean;
-  required_fields: string[];
   model: string;
   temperature: number;
 }
@@ -441,15 +358,9 @@ const DEFAULT_PROMPT_FIELDS: PromptFields = {
   prompt_text: '',
   opening_message: '',
   opening_message_model: 'static',
-  tone: 'friendly',
-  max_message_length: 160,
   reply_delay_seconds: 30,
   followup_delay_seconds: 3600,
   max_followups: 5,
-  can_book: true,
-  can_escalate_to_human: true,
-  can_close_unqualified: false,
-  required_fields: [],
   model: '',
   temperature: 0.7,
 };
@@ -470,28 +381,7 @@ const versionsLoading = ref(false);
 const versionForm = ref<PromptFields>(structuredClone(DEFAULT_PROMPT_FIELDS));
 const versionError = ref('');
 const versionSuccess = ref('');
-const newRequiredField = ref('');
 let editPromptSnapshot = '';
-
-// Calendar assignments
-interface CalendarRecord {
-  id: string;
-  name: string;
-  status: string;
-  settings_json?: Record<string, unknown>;
-}
-
-function calLabel(cal: CalendarRecord): string {
-  const label = cal.settings_json?.label;
-  return typeof label === 'string' && label ? label : cal.name;
-}
-
-const workspaceCalendars = ref<CalendarRecord[]>([]);
-const assignedCalendarIds = ref<Set<string>>(new Set());
-const calendarsLoading = ref(false);
-const calendarToggling = ref<string | null>(null);
-const calendarAssignSuccess = ref('');
-const calendarAssignError = ref('');
 
 let workspaceId: string | null = null;
 
@@ -552,28 +442,18 @@ async function fetchEnvStatus() {
 function normalizeVersion(version?: VersionRecord | null): PromptFields {
   if (!version) return structuredClone(DEFAULT_PROMPT_FIELDS);
 
-  const systemRules = (version.system_rules_json ?? {}) as Record<string, unknown>;
   const cadence = (version.reply_cadence_json ?? {}) as Record<string, unknown>;
-  const actions = (version.allowed_actions_json ?? {}) as Record<string, unknown>;
-  const qualificationRules = (version.qualification_rules_json ?? {}) as Record<string, unknown>;
   const config = (version.config_json ?? {}) as Record<string, unknown>;
-  const requiredFields = qualificationRules.required_fields;
 
   return {
     prompt_text: version.prompt_text ?? '',
     opening_message: String(config.opening_message ?? ''),
     opening_message_model: String(config.opening_message_model ?? 'static'),
-    tone: String(systemRules.tone ?? 'friendly'),
-    max_message_length: Number(systemRules.max_message_length ?? 160),
     reply_delay_seconds: cadence.reply_delay_seconds !== undefined
       ? Number(cadence.reply_delay_seconds)
       : (Number(cadence.coalesce_window_seconds) || 0) + (Number(cadence.initial_delay_seconds) || 30),
     followup_delay_seconds: Number(cadence.followup_delay_seconds ?? 3600),
     max_followups: Number(cadence.max_followups ?? 5),
-    can_book: Boolean(actions.can_book ?? true),
-    can_escalate_to_human: Boolean(actions.can_escalate_to_human ?? true),
-    can_close_unqualified: Boolean(actions.can_close_unqualified ?? false),
-    required_fields: Array.isArray(requiredFields) ? requiredFields.filter((field): field is string => typeof field === 'string') : [],
     model: String(config.model ?? ''),
     temperature: Number(config.temperature ?? 0.7),
   };
@@ -589,15 +469,9 @@ function promptFingerprint(fields: PromptFields): string {
     prompt_text: fields.prompt_text,
     opening_message: fields.opening_message,
     opening_message_model: fields.opening_message_model,
-    tone: fields.tone,
-    max_message_length: fields.max_message_length,
     reply_delay_seconds: fields.reply_delay_seconds,
     followup_delay_seconds: fields.followup_delay_seconds,
     max_followups: fields.max_followups,
-    can_book: fields.can_book,
-    can_escalate_to_human: fields.can_escalate_to_human,
-    can_close_unqualified: fields.can_close_unqualified,
-    required_fields: fields.required_fields,
     model: fields.model,
     temperature: fields.temperature,
   });
@@ -606,22 +480,10 @@ function promptFingerprint(fields: PromptFields): string {
 function buildVersionPayload(fields: PromptFields) {
   return {
     prompt_text: fields.prompt_text,
-    system_rules_json: {
-      tone: fields.tone,
-      max_message_length: fields.max_message_length,
-    },
     reply_cadence_json: {
       reply_delay_seconds: fields.reply_delay_seconds,
       followup_delay_seconds: fields.followup_delay_seconds,
       max_followups: fields.max_followups,
-    },
-    allowed_actions_json: {
-      can_book: fields.can_book,
-      can_escalate_to_human: fields.can_escalate_to_human,
-      can_close_unqualified: fields.can_close_unqualified,
-    },
-    qualification_rules_json: {
-      required_fields: fields.required_fields,
     },
     config_json: {
       ...(fields.model ? { model: fields.model, provider: providerForModel(fields.model) } : {}),
@@ -796,99 +658,9 @@ async function activateVersion(version: VersionRecord) {
   }
 }
 
-function addRequiredField() {
-  const value = newRequiredField.value.trim();
-  if (!value) return;
-  if (!versionForm.value.required_fields.includes(value)) {
-    versionForm.value.required_fields.push(value);
-  }
-  newRequiredField.value = '';
-}
-
-async function fetchCalendars() {
-  if (!workspaceId || !agent.value) return;
-  calendarsLoading.value = true;
-
-  try {
-    const wsParams = new URLSearchParams({ workspace_id: workspaceId });
-    const agentParams = new URLSearchParams({ workspace_id: workspaceId, agent_id: agent.value.id });
-
-    const [wsRes, agentRes] = await Promise.all([
-      fetch(`${API_BASE}/api-calendars-list?${wsParams}`),
-      fetch(`${API_BASE}/api-agent-calendars-list?${agentParams}`),
-    ]);
-
-    if (wsRes.ok) {
-      workspaceCalendars.value = await wsRes.json();
-    }
-    if (agentRes.ok) {
-      const assigned: CalendarRecord[] = await agentRes.json();
-      assignedCalendarIds.value = new Set(assigned.map((c) => c.id));
-    }
-  } finally {
-    calendarsLoading.value = false;
-  }
-}
-
-async function toggleCalendarAssignment(calendarId: string, checked: boolean) {
-  if (!workspaceId || !agent.value) return;
-  calendarToggling.value = calendarId;
-  calendarAssignSuccess.value = '';
-  calendarAssignError.value = '';
-
-  try {
-    if (checked) {
-      const res = await fetch(`${API_BASE}/api-agent-calendars-assign`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspace_id: workspaceId,
-          agent_id: agent.value.id,
-          calendar_id: calendarId,
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        calendarAssignError.value = data.error || 'Failed to assign calendar';
-        return;
-      }
-
-      assignedCalendarIds.value = new Set([...assignedCalendarIds.value, calendarId]);
-      calendarAssignSuccess.value = 'Calendar assigned';
-    } else {
-      const res = await fetch(`${API_BASE}/api-agent-calendars-remove`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspace_id: workspaceId,
-          agent_id: agent.value.id,
-          calendar_id: calendarId,
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        calendarAssignError.value = data.error || 'Failed to remove calendar';
-        return;
-      }
-
-      const next = new Set(assignedCalendarIds.value);
-      next.delete(calendarId);
-      assignedCalendarIds.value = next;
-      calendarAssignSuccess.value = 'Calendar removed';
-    }
-  } catch {
-    calendarAssignError.value = 'Network error. Please try again.';
-  } finally {
-    calendarToggling.value = null;
-  }
-}
-
 onMounted(async () => {
   const session = await getSessionContext();
   workspaceId = session.workspaceId;
   await Promise.all([fetchEnvStatus(), fetchAgent()]);
-  await fetchCalendars();
 });
 </script>
