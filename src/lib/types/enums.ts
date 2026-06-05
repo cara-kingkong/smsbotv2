@@ -113,6 +113,7 @@ export enum ConversationEventType {
   BookingFailed = 'booking_failed',
   HumanTakeover = 'human_takeover',
   HumanRelease = 'human_release',
+  EscalationNotified = 'escalation_notified',
   Paused = 'paused',
   Resumed = 'resumed',
   OptedOut = 'opted_out',
