@@ -23,6 +23,7 @@ import {
 } from '../../src/lib/types';
 import { CRMService } from '../../src/lib/crm/service';
 import { buildConversationNote } from '../../src/lib/crm/notes';
+import { applyFirstMessageSentTag } from '../../src/lib/crm/message-sent-tag';
 import type { AIProviderAdapter, AIDecision, Calendar } from '../../src/lib/types';
 import { CalendlyAdapter } from '../../src/lib/calendar/adapters/calendly';
 import { isWithinBusinessHours, getNextBusinessHoursStart, filterSlotsWithinBusinessHours } from '../../src/lib/utils/business-hours';
@@ -408,6 +409,8 @@ export default async (req: Request, _context: Context) =>
           source_job_id: jobId,
         });
 
+        await applyFirstMessageSentTag(db, queueService, conversation_id);
+
         await db.from('ai_decisions')
           .update({ message_id: message.id })
           .eq('conversation_id', conversation_id)
@@ -551,6 +554,8 @@ export default async (req: Request, _context: Context) =>
         sender_type: SenderType.AI,
         source_job_id: jobId,
       });
+
+      await applyFirstMessageSentTag(db, queueService, conversation_id);
 
       await db.from('ai_decisions')
         .update({ message_id: message.id })

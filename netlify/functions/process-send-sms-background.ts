@@ -7,6 +7,7 @@ import { PhoneNumberService } from '../../src/lib/messaging/phone-numbers';
 import { checkSendAllowed } from '../../src/lib/messaging/send-guard';
 import { LeadService } from '../../src/lib/leads/service';
 import { runQueueJob } from '../../src/lib/queues/job-runner';
+import { applyFirstMessageSentTag } from '../../src/lib/crm/message-sent-tag';
 import { ConversationStatus, SenderType } from '../../src/lib/types';
 
 interface ProcessSendSmsPayload {
@@ -139,6 +140,9 @@ export default async (req: Request, _context: Context) =>
       to: payload.to,
       from: fromNumber,
     });
+
+    // Tag the CRM contact on the first outbound message of the conversation.
+    await applyFirstMessageSentTag(context.db, context.queueService, payload.conversation_id);
 
     return new Response('OK', { status: 200 });
   });
