@@ -268,6 +268,9 @@ describe('ConversationService', () => {
       expect(updatePayload.status).toBe(ConversationStatus.Completed);
       expect(updatePayload.needs_human).toBe(false);
       expect(updatePayload.human_controlled).toBe(false);
+      // Closing must not bump recency — otherwise the just-closed conversation
+      // jumps to the top of the activity-sorted inbox.
+      expect(updatePayload.last_activity_at).toBeUndefined();
     });
 
     it('sets closed_at for OptedOut status', async () => {
@@ -326,6 +329,8 @@ describe('ConversationService', () => {
       expect(updatePayload.status).toBe(ConversationStatus.Active);
       expect(updatePayload.needs_human).toBe(false);
       expect(updatePayload.human_controlled).toBe(false);
+      // Non-terminal transitions still count as activity.
+      expect(updatePayload.last_activity_at).toBeDefined();
     });
   });
 });
