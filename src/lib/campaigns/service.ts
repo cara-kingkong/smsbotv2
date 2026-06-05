@@ -41,7 +41,7 @@ export class CampaignService {
     return data;
   }
 
-  async listByWorkspace(workspaceId: string): Promise<Campaign[]> {
+  async listByWorkspace(workspaceId: string): Promise<(Campaign & { agent_count: number })[]> {
     const { data, error } = await this.db
       .from('campaigns')
       .select('*')
@@ -50,7 +50,27 @@ export class CampaignService {
       .order('created_at', { ascending: false });
 
     if (error) throw new Error(`Failed to list campaigns: ${error.message}`);
-    return data ?? [];
+
+    const campaigns = data ?? [];
+    if (campaigns.length === 0) return [];
+
+    // Tally non-deleted agents per campaign in one query so the list view can
+    // show an assignment count without an N+1 fan-out.
+    const campaignIds = campaigns.map((c) => c.id);
+    const { data: agents, error: agentsError } = await this.db
+      .from('agents')
+      .select('campaign_id')
+      .in('campaign_id', campaignIds)
+      .is('deleted_at', null);
+
+    if (agentsError) throw new Error(`Failed to count campaign agents: ${agentsError.message}`);
+
+    const countByCampaign = new Map<string, number>();
+    for (const agent of (agents ?? []) as { campaign_id: string }[]) {
+      countByCampaign.set(agent.campaign_id, (countByCampaign.get(agent.campaign_id) ?? 0) + 1);
+    }
+
+    return campaigns.map((c) => ({ ...c, agent_count: countByCampaign.get(c.id) ?? 0 }));
   }
 
   async update(id: string, updates: Partial<Pick<Campaign, 'name' | 'status' | 'business_hours_json' | 'stop_conditions_json' | 'crm_tag_mappings_json'>>): Promise<Campaign> {
