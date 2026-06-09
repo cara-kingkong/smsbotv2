@@ -57,6 +57,15 @@ export interface AIPromptContext {
    * — crucially — knows NOT to just repeat its previous message.
    */
   followup?: { number: number; total: number };
+  /**
+   * Set when a previous generation on this same turn tried to offer times or
+   * book before the lead was qualified, and the system blocked it. Tells the
+   * model the lead is NOT yet qualified per its own rules: it must keep
+   * qualifying and must NOT offer times or book this turn. This backs the
+   * code-level qualification gate so the next message continues qualifying
+   * instead of repeating a premature "I'll get you booked in" line.
+   */
+  booking_blocked?: boolean;
 }
 
 export interface OpeningMessageContext {
