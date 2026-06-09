@@ -3,6 +3,7 @@ import type { AIProviderAdapter, AIPromptContext, AIDecision, OpeningMessageCont
 import { QualificationState } from '@lib/types';
 import { reactionPromptNote } from '@lib/utils/reaction';
 import { followupPromptNote, FOLLOWUP_USER_TURN } from '@lib/utils/followups';
+import { BOOKING_BLOCKED_NOTE } from '@lib/utils/booking-guard';
 
 const DEFAULT_OPENING_MODEL = 'claude-haiku-4-5-20251001';
 const DEFAULT_SUMMARY_MODEL = 'claude-haiku-4-5-20251001';
@@ -142,6 +143,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
       '',
       context.latest_inbound_reaction ? reactionPromptNote(context.latest_inbound_reaction) + '\n' : '',
       context.followup ? followupPromptNote(context.followup) + '\n' : '',
+      context.booking_blocked ? BOOKING_BLOCKED_NOTE + '\n' : '',
       DECISION_SCHEMA,
     ].join('\n');
 

@@ -537,6 +537,7 @@ Represents an operational SMS conversation with a lead.
 - `outcome` conversation_outcome null
 - `needs_human` boolean not null default false
 - `human_controlled` boolean not null default false
+- `has_lead_reply` boolean not null default false — true once the lead has sent at least one inbound message (maintained by the message-insert trigger; used for "engaged" reporting)
 - `assigned_user_id` uuid null references `users(id)`
 - `source_type` text not null default 'webhook'
 - `source_reference` text null

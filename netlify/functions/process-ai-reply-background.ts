@@ -363,6 +363,64 @@ export default async (req: Request, _context: Context) =>
       await conversationService.setOutcome(conversation_id, ConversationOutcome.Unqualified);
     }
 
+    // ── Qualification gate (defense in depth) ────────────────────
+    // The qualification rules live in the agent prompt, but a prompt can be
+    // ignored by the model — and the deterministic acceptance fallback further
+    // down doesn't consult the model at all. So we hard-gate EVERY booking
+    // pathway here: a lead is only offered times or booked once the AI has
+    // explicitly assessed them as `qualified`, on this turn or any earlier one
+    // (qualification is sticky — once reached it holds even if a later turn
+    // where the lead just picks a time reads as "exploring"). When a booking is
+    // attempted too early we block it and re-ask the model for a reply that
+    // keeps qualifying, rather than sending a premature "I'll book you in" line.
+    const bookingAcceptance = detectBookingAcceptance(history);
+    let bookingBlockedForQualification = false;
+
+    const wantsToBook =
+      decision.should_offer_times ||
+      decision.should_book ||
+      (bookingAcceptance.acceptanceDetected && calendars.length > 0);
+
+    if (wantsToBook && !(await hasReachedQualified(db, conversation_id, decision))) {
+      bookingBlockedForQualification = true;
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: 'booking_blocked_unqualified',
+        event_payload_json: {
+          qualification_state: decision.qualification_state,
+          attempted_should_offer_times: decision.should_offer_times,
+          attempted_should_book: decision.should_book,
+          acceptance_fallback: bookingAcceptance.acceptanceDetected,
+          evidence: bookingAcceptance.evidence,
+        },
+      });
+
+      // Keep qualifying: re-ask the model for a reply that continues
+      // qualification instead of booking. Hard-strip every booking flag
+      // afterwards so nothing books this turn even if the model insists again.
+      try {
+        const requalify = await aiService.generateReply({
+          agent_version: version,
+          conversation_history: history,
+          lead,
+          available_calendar_ids: calendars.map((c) => c.id),
+          available_calendars: calendars.map((c) => ({ id: c.id, name: c.name })),
+          provider_key: providerKey,
+          booking_blocked: true,
+        });
+        if (requalify.reply_text) decision.reply_text = requalify.reply_text;
+        decision.qualification_state = requalify.qualification_state;
+      } catch (err) {
+        console.error('Re-qualify generation failed; suppressing booking, keeping prior reply:', err);
+      }
+
+      decision.should_offer_times = false;
+      decision.should_book = false;
+      decision.confirmed_time = null;
+      decision.escalate_to_human = false;
+      decision.should_reply = true;
+    }
+
     // ── Phase 1: Offer available time slots ──────────────────────
     if (decision.should_offer_times && !decision.should_book && calendars.length > 0) {
       const slotsCalendar = calendars[0];
@@ -473,7 +531,6 @@ export default async (req: Request, _context: Context) =>
       console.log(`[Cancel] Booking cancellation for ${conversation_id}: ${cancelled ? 'success' : 'no booking found'}`);
     }
 
-    const bookingAcceptance = detectBookingAcceptance(history);
     let tookAction = false;
 
     if (decision.escalate_to_human) {
@@ -636,6 +693,7 @@ export default async (req: Request, _context: Context) =>
       }
       return new Response('Booking needs human — no resolvable calendar', { status: 200 });
     } else if (
+      !bookingBlockedForQualification &&
       bookingAcceptance.acceptanceDetected &&
       calendars.length > 0
     ) {
@@ -673,7 +731,7 @@ export default async (req: Request, _context: Context) =>
       });
       bookingQueued = true;
       tookAction = true;
-    } else if (bookingAcceptance.acceptanceDetected) {
+    } else if (!bookingBlockedForQualification && bookingAcceptance.acceptanceDetected) {
       // No calendars at all — escalate, but only send a system message
       // if the AI didn't already reply (avoid double messages).
       await db.from('conversation_events').insert({
@@ -820,6 +878,32 @@ export default async (req: Request, _context: Context) =>
 
     return new Response('OK', { status: 200 });
   });
+
+/**
+ * Has this lead ever been explicitly assessed as `qualified`? True if the
+ * current decision says so, or if any earlier AI turn in this conversation did.
+ * Qualification is sticky: once a lead qualifies they stay eligible to book even
+ * if a later turn (e.g. them just picking a time) reads as a softer state. This
+ * is the authority behind the booking gate — booking is only ever allowed when
+ * this returns true.
+ */
+async function hasReachedQualified(
+  db: { from: (table: string) => ReturnType<import('@supabase/supabase-js').SupabaseClient['from']> },
+  conversationId: string,
+  currentDecision: AIDecision,
+): Promise<boolean> {
+  if (currentDecision.qualification_state === QualificationState.Qualified) return true;
+
+  const { data } = await db
+    .from('conversation_events')
+    .select('id')
+    .eq('conversation_id', conversationId)
+    .eq('event_type', ConversationEventType.AIReplyGenerated)
+    .eq('event_payload_json->>qualification_state', QualificationState.Qualified)
+    .limit(1);
+
+  return Array.isArray(data) && data.length > 0;
+}
 
 async function queueSystemMessage(
   queueService: {
