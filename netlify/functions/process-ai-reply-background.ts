@@ -760,29 +760,50 @@ export default async (req: Request, _context: Context) =>
       return new Response('Needs human', { status: 200 });
     }
 
-    // Intentional silence on a reaction: when the lead's latest inbound is just
-    // an emoji reaction / tapback and the AI deliberately chose not to reply,
-    // stay quiet — don't escalate or send a "team is reviewing" message. Not
-    // replying to a 👍 is the natural, human behaviour.
+    // Intentional silence: when the AI deliberately chose not to reply (and is
+    // neither escalating nor booking), stay quiet — don't escalate or send a
+    // "team is reviewing" message. This covers emoji reactions / tapbacks AND
+    // plain-text sign-offs like "sweet" or "Will do!". Not replying to those is
+    // the natural, human behaviour. The canned hand-off message below is
+    // reserved for genuine no-action failures (e.g. the AI wanted to reply but
+    // produced no text).
     if (
       !tookAction &&
       !bookingQueued &&
       !decision.should_reply &&
-      !decision.escalate_to_human &&
-      latestInboundReaction
+      !decision.escalate_to_human
     ) {
       await db.from('conversation_events').insert({
         conversation_id,
-        event_type: 'ai_skipped_reaction',
+        event_type: latestInboundReaction ? 'ai_skipped_reaction' : 'ai_skipped_no_reply',
         event_payload_json: {
-          reaction_kind: latestInboundReaction.kind,
-          reaction_description: latestInboundReaction.description,
+          ...(latestInboundReaction
+            ? {
+                reaction_kind: latestInboundReaction.kind,
+                reaction_description: latestInboundReaction.description,
+              }
+            : {}),
           qualification_state: decision.qualification_state,
           reason_summary: decision.reason_summary,
         },
       });
-      await conversationService.updateStatus(conversation_id, ConversationStatus.WaitingForLead);
-      return new Response('Skipped reaction — no reply needed', { status: 200 });
+      // A lead who has disqualified themselves (e.g. "I don't have a business")
+      // is done — close the thread as Completed (the Unqualified outcome was
+      // already recorded above). Everyone else (sign-offs, acknowledgements like
+      // "sweet" or "Will do!") may still re-engage, so leave them waiting.
+      const leadIsUnqualified = decision.qualification_state === 'unqualified';
+      await conversationService.updateStatus(
+        conversation_id,
+        leadIsUnqualified ? ConversationStatus.Completed : ConversationStatus.WaitingForLead,
+      );
+      return new Response(
+        leadIsUnqualified
+          ? 'Skipped — lead unqualified, no reply needed'
+          : latestInboundReaction
+            ? 'Skipped reaction — no reply needed'
+            : 'Skipped — AI chose not to reply',
+        { status: 200 },
+      );
     }
 
     if (!tookAction && trigger === 'inbound_message') {

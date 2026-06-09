@@ -47,3 +47,28 @@ All notable changes to Kong SMS are documented here. Format loosely follows
   `src/components/CampaignDetail.vue`)
 
 - Documented the `has_lead_reply` column in `docs/database-schema.md`.
+
+- **Deliberate AI silence closes the loop instead of escalating.** When the AI
+  decides there is nothing worth replying to and is neither escalating nor
+  booking, the conversation now resolves quietly rather than being flagged for
+  a human. Leads the AI has assessed as `unqualified` close as **Completed**
+  (the `unqualified` outcome was already recorded); everyone else (sign-offs,
+  acknowledgements) stays **Waiting for lead** so they can re-engage. The
+  "team is reviewing" hand-off SMS is now reserved for genuine no-action
+  failures (e.g. the AI wanted to reply but produced no text).
+  (`netlify/functions/process-ai-reply-background.ts`)
+
+### Fixed
+
+- **No more canned "team member is reviewing" reply on conversational
+  sign-offs.** The silent-skip behaviour introduced for emoji reactions /
+  tapbacks only matched reactions, so plain-text sign-offs like "sweet" or
+  "Will do!" still fell through to the generic no-action branch — which sent
+  the "A team member is reviewing the next step and will follow up shortly."
+  SMS and marked the thread `needs_human`, even though the AI had correctly
+  decided there was nothing left to say. The silence branch now covers any
+  deliberate no-reply decision (`should_reply = false`, not escalating, not
+  booking), regardless of whether the last inbound was a reaction.
+  - Reaction threads keep the richer `ai_skipped_reaction` event; the new
+    plain-text case logs `ai_skipped_no_reply` for diagnostics.
+  - File: `netlify/functions/process-ai-reply-background.ts`.
