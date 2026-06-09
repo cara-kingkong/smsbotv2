@@ -87,6 +87,7 @@ export enum CRMEventType {
   ConversationUnqualified = 'conversation_unqualified',
   ConversationOptedOut = 'conversation_opted_out',
   ConversationNeedsHuman = 'conversation_needs_human',
+  ConversationMessageSent = 'conversation_message_sent',
 }
 
 /** CRM sync status */
@@ -113,6 +114,7 @@ export enum ConversationEventType {
   BookingFailed = 'booking_failed',
   HumanTakeover = 'human_takeover',
   HumanRelease = 'human_release',
+  EscalationNotified = 'escalation_notified',
   Paused = 'paused',
   Resumed = 'resumed',
   OptedOut = 'opted_out',

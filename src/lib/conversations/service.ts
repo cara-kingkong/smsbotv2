@@ -25,8 +25,12 @@ export class ConversationService {
       status,
       needs_human: status === ConversationStatus.NeedsHuman,
       human_controlled: status === ConversationStatus.HumanControlled,
-      last_activity_at: now,
-      ...(isTerminal ? { closed_at: now } : {}),
+      // Terminal transitions only record closed_at — leaving last_activity_at
+      // at the time of the last real message so closing doesn't bump the
+      // conversation to the top of the recency-sorted inbox.
+      ...(isTerminal
+        ? { closed_at: now }
+        : { last_activity_at: now }),
     };
   }
 

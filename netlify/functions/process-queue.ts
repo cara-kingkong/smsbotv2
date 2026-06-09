@@ -276,6 +276,7 @@ function getHandlerUrl(jobType: string, baseUrl: string): string | null {
     process_send_sms: `${baseUrl}/.netlify/functions/process-send-sms-background`,
     process_booking: `${baseUrl}/.netlify/functions/process-booking-background`,
     process_crm_sync: `${baseUrl}/.netlify/functions/process-crm-sync-background`,
+    notify_escalation: `${baseUrl}/.netlify/functions/process-escalation-notify-background`,
   };
   return handlers[jobType] ?? null;
 }

@@ -23,6 +23,7 @@ import {
 } from '../../src/lib/types';
 import { CRMService } from '../../src/lib/crm/service';
 import { buildConversationNote } from '../../src/lib/crm/notes';
+import { applyFirstMessageSentTag } from '../../src/lib/crm/message-sent-tag';
 import type { AIProviderAdapter, AIDecision, Calendar } from '../../src/lib/types';
 import { CalendlyAdapter } from '../../src/lib/calendar/adapters/calendly';
 import { isWithinBusinessHours, getNextBusinessHoursStart, filterSlotsWithinBusinessHours } from '../../src/lib/utils/business-hours';
@@ -40,6 +41,13 @@ interface ProcessAIReplyPayload {
   worker_id?: string;
   lease_seconds?: number;
 }
+
+// Lead-facing holding lines used when we escalate to a human. We only send
+// these when the lead has actually engaged — a cold thread (lead never replied)
+// stays silent so we don't break the human persona by texting a ghost. The team
+// is notified out-of-band via the escalation webhook (notify_escalation job).
+const ENGAGED_ESCALATION_MESSAGE = 'No problem — let me get that sorted for you. I’ll be back in touch shortly.';
+const BOOKING_HANDOFF_MESSAGE = 'Perfect — leave it with me and I’ll lock that in. I’ll confirm the details shortly.';
 
 /**
  * Background function: Generate AI reply and send SMS.
@@ -459,6 +467,8 @@ export default async (req: Request, _context: Context) =>
           source_job_id: jobId,
         });
 
+        await applyFirstMessageSentTag(db, queueService, conversation_id);
+
         await db.from('ai_decisions')
           .update({ message_id: message.id })
           .eq('conversation_id', conversation_id)
@@ -553,16 +563,33 @@ export default async (req: Request, _context: Context) =>
           },
         });
         await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
-        try {
-          await queueSystemMessage(queueService, db, {
-            workspaceId: conversation.workspace_id,
-            conversationId: conversation_id,
-            to: lead.phone_e164,
-            bodyText: 'Thanks, I am handing this off so we can confirm the booking details for you.',
-            sourceJobId: undefined,
-          });
-        } catch (err) {
-          console.error('Failed to queue escalation SMS:', err);
+
+        // Notify the team via webhook instead of texting the lead. The bot is
+        // presented as a real person, so a "handing this off" SMS breaks the
+        // illusion — and on a cold thread it'd text a lead who never replied.
+        await enqueueEscalationNotification(queueService, {
+          workspaceId: conversation.workspace_id,
+          conversationId: conversation_id,
+          reason: 'ai_escalation',
+          shouldBook: decision.should_book,
+          qualificationState: decision.qualification_state,
+        });
+
+        // Only send a lead-facing line when the lead has actually engaged
+        // (e.g. they asked for a real person mid-conversation). Cold threads
+        // stay silent — `lastInbound` is the lead's most recent inbound message.
+        if (lastInbound) {
+          try {
+            await queueSystemMessage(queueService, db, {
+              workspaceId: conversation.workspace_id,
+              conversationId: conversation_id,
+              to: lead.phone_e164,
+              bodyText: ENGAGED_ESCALATION_MESSAGE,
+              sourceJobId: undefined,
+            });
+          } catch (err) {
+            console.error('Failed to queue escalation SMS:', err);
+          }
         }
         return new Response('Escalated', { status: 200 });
       }
@@ -584,6 +611,8 @@ export default async (req: Request, _context: Context) =>
         sender_type: SenderType.AI,
         source_job_id: jobId,
       });
+
+      await applyFirstMessageSentTag(db, queueService, conversation_id);
 
       await db.from('ai_decisions')
         .update({ message_id: message.id })
@@ -668,23 +697,37 @@ export default async (req: Request, _context: Context) =>
       tookAction = true;
     } else if (decision.should_book && !decision.recommended_calendar_id) {
       // AI wants to book but no calendar could be resolved
+      const bookingNeedsHumanReason = calendars.length === 0 ? 'no_assigned_calendar' : 'ambiguous_calendar_selection';
       await db.from('conversation_events').insert({
         conversation_id,
         event_type: 'booking_needs_human',
         event_payload_json: {
-          reason: calendars.length === 0 ? 'no_assigned_calendar' : 'ambiguous_calendar_selection',
+          reason: bookingNeedsHumanReason,
           should_book: true,
           available_calendars: calendars.map((c) => c.id),
         },
       });
       await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
+
+      // Notify the team via webhook so a human can finish the booking.
+      await enqueueEscalationNotification(queueService, {
+        workspaceId: conversation.workspace_id,
+        conversationId: conversation_id,
+        reason: bookingNeedsHumanReason,
+        shouldBook: true,
+        qualificationState: decision.qualification_state,
+      });
+
+      // The lead just agreed to book, so a warm holding line is appropriate
+      // here (unlike a cold escalation). Skip it only if we already replied
+      // this turn, to avoid double-texting.
       if (!tookAction) {
         try {
           await queueSystemMessage(queueService, db, {
             workspaceId: conversation.workspace_id,
             conversationId: conversation_id,
             to: lead.phone_e164,
-            bodyText: 'Thanks, a team member will confirm the booking details for you shortly.',
+            bodyText: BOOKING_HANDOFF_MESSAGE,
             sourceJobId: undefined,
           });
         } catch (err) {
@@ -924,6 +967,40 @@ async function hasReachedQualified(
     .limit(1);
 
   return Array.isArray(data) && data.length > 0;
+}
+
+/**
+ * Enqueue a team-facing escalation notification (POSTs to the escalation
+ * webhook in a separate, retriable job). Never sends anything to the lead.
+ */
+async function enqueueEscalationNotification(
+  queueService: {
+    enqueue: (input: {
+      workspace_id: string;
+      job_type: string;
+      queue_name: string;
+      payload: Record<string, unknown>;
+    }) => Promise<unknown>;
+  },
+  input: {
+    workspaceId: string;
+    conversationId: string;
+    reason: string;
+    shouldBook: boolean;
+    qualificationState?: string | null;
+  },
+) {
+  await queueService.enqueue({
+    workspace_id: input.workspaceId,
+    job_type: 'notify_escalation',
+    queue_name: 'default',
+    payload: {
+      conversation_id: input.conversationId,
+      reason: input.reason,
+      should_book: input.shouldBook,
+      qualification_state: input.qualificationState ?? null,
+    },
+  });
 }
 
 async function queueSystemMessage(

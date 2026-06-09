@@ -340,6 +340,7 @@ interface CampaignRecord {
 }
 
 type CRMEventKey =
+  | 'conversation_message_sent'
   | 'conversation_qualified'
   | 'conversation_unqualified'
   | 'conversation_needs_human'
@@ -347,6 +348,7 @@ type CRMEventKey =
   | 'conversation_opted_out';
 
 const crmTagRows: { eventType: CRMEventKey; label: string; placeholder: string; help: string }[] = [
+  { eventType: 'conversation_message_sent', label: 'Message Sent', placeholder: 'e.g. 1239', help: 'Applied once when the first SMS is sent to the lead (tag only, no note).' },
   { eventType: 'conversation_qualified', label: 'Qualified', placeholder: 'e.g. 1234', help: 'Applied when the AI marks the lead qualified.' },
   { eventType: 'conversation_unqualified', label: 'Unqualified', placeholder: 'e.g. 1235', help: 'Applied when the AI marks the lead unqualified.' },
   { eventType: 'conversation_needs_human', label: 'Needs Human', placeholder: 'e.g. 1236', help: 'Applied when the AI escalates to a human.' },
@@ -356,6 +358,7 @@ const crmTagRows: { eventType: CRMEventKey; label: string; placeholder: string; 
 
 function emptyTagMappings(): Record<CRMEventKey, string> {
   return {
+    conversation_message_sent: '',
     conversation_qualified: '',
     conversation_unqualified: '',
     conversation_needs_human: '',
