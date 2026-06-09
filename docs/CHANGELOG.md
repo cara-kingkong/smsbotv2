@@ -58,6 +58,16 @@ All notable changes to Kong SMS are documented here. Format loosely follows
   failures (e.g. the AI wanted to reply but produced no text).
   (`netlify/functions/process-ai-reply-background.ts`)
 
+- **No-action failures escalate via webhook, not a robotic SMS.** When the AI
+  genuinely can't act on an inbound message, the thread no longer texts the
+  lead the canned "A team member is reviewing the next step…" line. It now
+  notifies the team out-of-band via the escalation webhook
+  (`notify_escalation`, reason `ai_no_action`) and only sends the lead a warm
+  holding line when they have actually engaged (`lastInbound` present) — cold
+  threads stay silent so the human persona isn't broken. This brings the
+  no-action path in line with the other escalation paths (AI escalation,
+  booking-needs-human). (`netlify/functions/process-ai-reply-background.ts`)
+
 ### Fixed
 
 - **No more canned "team member is reviewing" reply on conversational

@@ -863,16 +863,31 @@ export default async (req: Request, _context: Context) =>
         },
       });
       await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
-      try {
-        await queueSystemMessage(queueService, db, {
-          workspaceId: conversation.workspace_id,
-          conversationId: conversation_id,
-          to: lead.phone_e164,
-          bodyText: 'Thanks for the message. A team member is reviewing the next step and will follow up shortly.',
-          sourceJobId: undefined,
-        });
-      } catch (err) {
-        console.error('Failed to queue ai-no-action SMS:', err);
+
+      // Notify the team via webhook so a human can pick this up. As with the
+      // other escalation paths, don't text the lead a holding line unless they
+      // have actually engaged — texting a cold thread (lead never replied)
+      // breaks the human persona.
+      await enqueueEscalationNotification(queueService, {
+        workspaceId: conversation.workspace_id,
+        conversationId: conversation_id,
+        reason: 'ai_no_action',
+        shouldBook: decision.should_book,
+        qualificationState: decision.qualification_state,
+      });
+
+      if (lastInbound) {
+        try {
+          await queueSystemMessage(queueService, db, {
+            workspaceId: conversation.workspace_id,
+            conversationId: conversation_id,
+            to: lead.phone_e164,
+            bodyText: ENGAGED_ESCALATION_MESSAGE,
+            sourceJobId: undefined,
+          });
+        } catch (err) {
+          console.error('Failed to queue ai-no-action SMS:', err);
+        }
       }
       return new Response('Needs human', { status: 200 });
     }
