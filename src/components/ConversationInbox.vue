@@ -3,6 +3,15 @@
     <!-- Conversation list sidebar -->
     <aside class="inbox-sidebar">
       <div class="inbox-sidebar-header">
+        <select
+          v-if="campaigns.length"
+          v-model="currentCampaign"
+          class="mb-2 w-full rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-[13px] text-zinc-700 focus:outline-none focus:ring-1 focus:ring-zinc-300"
+          @change="onCampaignChange"
+        >
+          <option value="">All campaigns</option>
+          <option v-for="c in campaigns" :key="c.id" :value="c.id">{{ c.name }}</option>
+        </select>
         <div class="flex flex-wrap gap-1">
           <button
             v-for="f in filters"
@@ -200,6 +209,8 @@ interface Conv {
   outcome: string | null;
   human_controlled: boolean;
   needs_human: boolean;
+  campaign_id?: string;
+  has_lead_reply?: boolean;
   last_activity_at: string;
   lead: Lead | null;
   last_message: { body_text: string; sender_type: string; created_at: string }[] | null;
@@ -216,9 +227,12 @@ interface Msg {
   created_at: string;
 }
 
+// "Active" is the engaged set: threads where the lead has actually replied and
+// the conversation is still ongoing (resolved server-side via `engaged=true`),
+// not the narrow status='active' it used to mean.
 const filters = [
   { label: 'All', value: '' },
-  { label: 'Active', value: 'active' },
+  { label: 'Active', value: 'engaged' },
   { label: 'Needs Human', value: 'needs_human' },
   { label: 'Human Controlled', value: 'human_controlled' },
   { label: 'Completed', value: 'completed' },
@@ -228,6 +242,8 @@ const loading = ref(true);
 const conversations = ref<Conv[]>([]);
 const loadError = ref('');
 const currentFilter = ref('');
+const campaigns = ref<{ id: string; name: string }[]>([]);
+const currentCampaign = ref('');
 const selectedId = ref<string | null>(null);
 const selected = ref<Conv | null>(null);
 const messages = ref<Msg[]>([]);
@@ -336,11 +352,22 @@ function resolveWorkspace(): string | null {
   return workspaceId || null;
 }
 
+async function fetchCampaigns() {
+  if (!workspaceId) return;
+  const res = await fetch(`${API_BASE}/api-campaigns-list?workspace_id=${workspaceId}`);
+  if (res.ok) campaigns.value = await res.json();
+}
+
 async function fetchConversations() {
   if (!workspaceId) return;
   loadError.value = '';
   const params = new URLSearchParams({ workspace_id: workspaceId });
-  if (currentFilter.value) params.set('status', currentFilter.value);
+  if (currentFilter.value === 'engaged') {
+    params.set('engaged', 'true');
+  } else if (currentFilter.value) {
+    params.set('status', currentFilter.value);
+  }
+  if (currentCampaign.value) params.set('campaign_id', currentCampaign.value);
   const res = await fetch(`${API_BASE}/api-inbox-list?${params}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: 'Failed to load conversations' }));
@@ -373,6 +400,15 @@ function scrollToBottom() {
 
 function setFilter(val: string) {
   currentFilter.value = val;
+  selectedId.value = null;
+  selected.value = null;
+  messages.value = [];
+  fetchConversations();
+}
+
+function onCampaignChange() {
+  // currentCampaign is already updated via v-model; clear the open thread
+  // since it may not belong to the newly selected campaign.
   selectedId.value = null;
   selected.value = null;
   messages.value = [];
@@ -474,7 +510,7 @@ onMounted(async () => {
     loading.value = false;
     return;
   }
-  await fetchConversations();
+  await Promise.all([fetchConversations(), fetchCampaigns()]);
   loading.value = false;
 
   const poll = async () => {

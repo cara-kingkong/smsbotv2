@@ -47,11 +47,14 @@ export default async (req: Request, _context: Context) => {
     }
 
     const includeTest = url.searchParams.get('include_test') === 'true';
+    const engaged = url.searchParams.get('engaged') === 'true';
+    const campaignId = url.searchParams.get('campaign_id');
 
     let query = db
       .from('conversations')
       .select(`
         id, status, human_controlled, needs_human, last_activity_at, outcome,
+        campaign_id, has_lead_reply,
         last_message_preview, last_message_sender_type, last_message_at,
         lead:leads(id, first_name, last_name, phone_e164, email)
       `)
@@ -66,6 +69,19 @@ export default async (req: Request, _context: Context) => {
 
     if (statusFilter) {
       query = query.eq('status', statusFilter);
+    }
+
+    // "Engaged" = the lead has actually replied at least once, on a thread
+    // that is still ongoing (not closed/opted-out/failed). Powers the
+    // redefined "Active" tab, which previously matched only status='active'.
+    if (engaged) {
+      query = query
+        .eq('has_lead_reply', true)
+        .not('status', 'in', '(completed,opted_out,failed)');
+    }
+
+    if (campaignId) {
+      query = query.eq('campaign_id', campaignId);
     }
 
     const { data: conversations, error } = await query;
