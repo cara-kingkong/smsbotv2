@@ -72,3 +72,18 @@ All notable changes to Kong SMS are documented here. Format loosely follows
   - Reaction threads keep the richer `ai_skipped_reaction` event; the new
     plain-text case logs `ai_skipped_no_reply` for diagnostics.
   - File: `netlify/functions/process-ai-reply-background.ts`.
+
+- **Opt-out requests with extra words are now honoured.** Inbound opt-out
+  detection only matched when the *entire* message was a single keyword, so
+  "Unsubscribe - sold business", "STOP texting me", and similar slipped through
+  — the lead was never marked opted out, the conversation stayed `active`, and
+  the AI kept replying (a TCPA/compliance risk). Detection now also matches when
+  a message leads with an opt-out keyword (`stop`, `unsubscribe`, `quit`, `end`)
+  or contains the unambiguous word "unsubscribe" anywhere.
+  - Biased toward honouring opt-outs, but ambiguous keywords are not matched
+    mid-sentence, so "the end of the day", "I quit my job", and "don't stop"
+    keep the conversation active. Inflections ("ending", "stopper") and
+    "cancel" (booking cancellation) are excluded.
+  - Extracted into a tested `isOptOut` helper.
+    Files: `src/lib/utils/opt-out.ts`, `tests/lib/utils/opt-out.test.ts`,
+    `netlify/functions/webhook-twilio-inbound.ts`.
