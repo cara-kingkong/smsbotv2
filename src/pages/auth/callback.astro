@@ -34,6 +34,11 @@ const publicConfig = getPublicSupabaseConfig();
           detectSessionInUrl: false,
           storage: window.localStorage,
           storageKey: 'sb-auth-token',
+          // Keep localStorage only for the PKCE code verifier (stored
+          // independently of persistSession). Don't persist or auto-rotate the
+          // session — we hand the returned session straight to cookies below.
+          persistSession: false,
+          autoRefreshToken: false,
         },
       });
 

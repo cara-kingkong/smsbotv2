@@ -70,6 +70,11 @@ const passwordLoginEnabled =
           flowType: 'pkce',
           storage: window.localStorage,
           storageKey: 'sb-auth-token',
+          // Cookies are the source of truth. Don't let the browser library
+          // persist or background-rotate the session in localStorage — that
+          // desync invalidated the cookie refresh token and forced re-login.
+          persistSession: false,
+          autoRefreshToken: false,
         },
       });
 

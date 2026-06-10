@@ -17,7 +17,17 @@ export function getSupabaseClient(): SupabaseClient {
     throw new Error('Missing SUPABASE_URL or SUPABASE_ANON_KEY');
   }
 
-  _client = createClient(url, anonKey);
+  // Server-side singleton: cookies are the source of truth, so the client must
+  // not persist or auto-rotate sessions. Leaving these on caused the shared
+  // client to rotate refresh tokens across requests, invalidating cookie tokens
+  // and logging users out long before the 7-day cookie expired.
+  _client = createClient(url, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
   return _client;
 }
 
@@ -35,7 +45,13 @@ export function getServiceClient(): SupabaseClient {
     throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
   }
 
-  _serviceClient = createClient(url, serviceKey);
+  _serviceClient = createClient(url, serviceKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
   return _serviceClient;
 }
 
@@ -51,6 +67,11 @@ export function getAuthenticatedClient(accessToken: string): SupabaseClient {
   }
 
   return createClient(url, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
     global: {
       headers: { Authorization: `Bearer ${accessToken}` },
     },
