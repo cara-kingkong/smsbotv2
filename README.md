@@ -38,6 +38,38 @@ npm test
 npm run lint
 ```
 
+## Scripts
+
+### Bulk-tag Keap contacts
+
+`scripts/tag-keap-contacts.mjs` applies a single Keap (Infusionsoft) tag to a list of contacts. Tagging in Keap is **additive** — applying a tag never removes a contact's existing tags, so all other tags stay intact.
+
+It needs a Keap **Personal Access Token** and the numeric **tag ID** (found in Keap under **Settings → Tags**). The token is read automatically from the repo's `.env` file (`KEAP_PERSONAL_ACCESS_TOKEN`), or from an env var of the same name — no need to pass it on the command line.
+
+```bash
+# Inline contact IDs
+node scripts/tag-keap-contacts.mjs <tagId> 5001 5002 5003
+
+# From a text file (one contact ID per line; blank lines and # comments ignored)
+node scripts/tag-keap-contacts.mjs <tagId> --file ids.txt
+
+# From a CSV file (uses the first column; any header row is skipped)
+node scripts/tag-keap-contacts.mjs <tagId> --csv contacts.csv
+
+# From a CSV where the ID is in another column (0-based index)
+node scripts/tag-keap-contacts.mjs <tagId> --csv contacts.csv --column 1
+
+# Slow down or speed up the pace (contacts per minute; default 20)
+node scripts/tag-keap-contacts.mjs <tagId> --csv contacts.csv --rate 30
+
+# Preview without calling the API
+node scripts/tag-keap-contacts.mjs <tagId> --csv contacts.csv --dry-run
+```
+
+The first argument is always the tag ID, followed by contact IDs (or `--file <path>` / `--csv <path>`). The CSV reader takes the first column by default (use `--column <index>` for another), and keeps only numeric cells — so a header row and any non-ID columns are skipped automatically. Contact IDs are de-duplicated automatically. Requests are paced at `--rate` contacts per minute (default 20), retried on rate-limit (`429`) and server errors, and reported per-contact with a ✓/✗ and progress counter; the script exits non-zero if any contact failed so you can re-run just the failures.
+
+> This is a local-only utility — it lives in `scripts/`, is not part of the Astro build, and never deploys or runs as part of the site.
+
 ## Deployment Notes
 
 ### Supabase Auth Configuration

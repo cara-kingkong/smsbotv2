@@ -8,6 +8,7 @@ import { ConversationOutcome, ConversationStatus, CRMEventType } from '../../src
 import { ConversationService } from '../../src/lib/conversations/service';
 import { CRMService } from '../../src/lib/crm/service';
 import { buildConversationNote } from '../../src/lib/crm/notes';
+import { isOptOut } from '../../src/lib/utils/opt-out';
 
 /**
  * Twilio inbound SMS webhook.
@@ -195,10 +196,11 @@ export default async (req: Request, _context: Context) => {
       });
     }
 
-    // Check for opt-out keywords (TCPA compliance: STOP is required, others optional)
-    // "cancel" is excluded — leads use it to cancel bookings, not to opt out
-    const optOutKeywords = ['stop', 'unsubscribe', 'quit', 'end'];
-    if (optOutKeywords.includes(inbound.body.trim().toLowerCase())) {
+    // Check for opt-out keywords (TCPA compliance: STOP is required, others
+    // optional). Honours keywords even when the lead adds context, e.g.
+    // "Unsubscribe - sold business". "cancel" is excluded — leads use it to
+    // cancel bookings, not to opt out. See isOptOut for the matching rules.
+    if (isOptOut(inbound.body)) {
       await conversationService.setOutcome(conversation.id, ConversationOutcome.OptedOut);
       await conversationService.updateStatus(conversation.id, ConversationStatus.OptedOut);
       await db.from('leads').update({ opted_out: true }).eq('id', lead.id);

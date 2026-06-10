@@ -473,7 +473,9 @@ function formatDate(iso: string): string {
 }
 
 function formatPercent(value: number): string {
-  return `${Math.round((value ?? 0) * 100)}%`;
+  // One decimal so a real-but-small rate (e.g. 1 booking in 253 = 0.4%)
+  // isn't rounded down to a misleading "0%".
+  return `${((value ?? 0) * 100).toFixed(1)}%`;
 }
 
 async function fetchCampaign() {

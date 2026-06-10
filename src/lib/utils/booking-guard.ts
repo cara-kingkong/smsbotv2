@@ -1,3 +1,15 @@
+/**
+ * Injected into the system prompt when the system has blocked a premature
+ * booking attempt for this turn (the lead is not yet `qualified`). Steers the
+ * regenerated reply back into qualification instead of booking.
+ */
+export const BOOKING_BLOCKED_NOTE =
+  `IMPORTANT — DO NOT BOOK YET: This lead has NOT met your qualification criteria, ` +
+  `so booking is currently blocked by the system. Do not offer times, do not say ` +
+  `you'll book them in, and do not imply a call is locked in. Instead, ask the single ` +
+  `next qualification question that gets you closer to a decision, in your normal warm, ` +
+  `casual tone. Set should_offer_times and should_book to false this turn.`;
+
 interface BookingSignal {
   acceptanceDetected: boolean;
   schedulingContext: boolean;

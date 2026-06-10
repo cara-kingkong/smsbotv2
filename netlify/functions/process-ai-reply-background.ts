@@ -371,6 +371,64 @@ export default async (req: Request, _context: Context) =>
       await conversationService.setOutcome(conversation_id, ConversationOutcome.Unqualified);
     }
 
+    // ── Qualification gate (defense in depth) ────────────────────
+    // The qualification rules live in the agent prompt, but a prompt can be
+    // ignored by the model — and the deterministic acceptance fallback further
+    // down doesn't consult the model at all. So we hard-gate EVERY booking
+    // pathway here: a lead is only offered times or booked once the AI has
+    // explicitly assessed them as `qualified`, on this turn or any earlier one
+    // (qualification is sticky — once reached it holds even if a later turn
+    // where the lead just picks a time reads as "exploring"). When a booking is
+    // attempted too early we block it and re-ask the model for a reply that
+    // keeps qualifying, rather than sending a premature "I'll book you in" line.
+    const bookingAcceptance = detectBookingAcceptance(history);
+    let bookingBlockedForQualification = false;
+
+    const wantsToBook =
+      decision.should_offer_times ||
+      decision.should_book ||
+      (bookingAcceptance.acceptanceDetected && calendars.length > 0);
+
+    if (wantsToBook && !(await hasReachedQualified(db, conversation_id, decision))) {
+      bookingBlockedForQualification = true;
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: 'booking_blocked_unqualified',
+        event_payload_json: {
+          qualification_state: decision.qualification_state,
+          attempted_should_offer_times: decision.should_offer_times,
+          attempted_should_book: decision.should_book,
+          acceptance_fallback: bookingAcceptance.acceptanceDetected,
+          evidence: bookingAcceptance.evidence,
+        },
+      });
+
+      // Keep qualifying: re-ask the model for a reply that continues
+      // qualification instead of booking. Hard-strip every booking flag
+      // afterwards so nothing books this turn even if the model insists again.
+      try {
+        const requalify = await aiService.generateReply({
+          agent_version: version,
+          conversation_history: history,
+          lead,
+          available_calendar_ids: calendars.map((c) => c.id),
+          available_calendars: calendars.map((c) => ({ id: c.id, name: c.name })),
+          provider_key: providerKey,
+          booking_blocked: true,
+        });
+        if (requalify.reply_text) decision.reply_text = requalify.reply_text;
+        decision.qualification_state = requalify.qualification_state;
+      } catch (err) {
+        console.error('Re-qualify generation failed; suppressing booking, keeping prior reply:', err);
+      }
+
+      decision.should_offer_times = false;
+      decision.should_book = false;
+      decision.confirmed_time = null;
+      decision.escalate_to_human = false;
+      decision.should_reply = true;
+    }
+
     // ── Phase 1: Offer available time slots ──────────────────────
     if (decision.should_offer_times && !decision.should_book && calendars.length > 0) {
       const slotsCalendar = calendars[0];
@@ -483,7 +541,6 @@ export default async (req: Request, _context: Context) =>
       console.log(`[Cancel] Booking cancellation for ${conversation_id}: ${cancelled ? 'success' : 'no booking found'}`);
     }
 
-    const bookingAcceptance = detectBookingAcceptance(history);
     let tookAction = false;
 
     if (decision.escalate_to_human) {
@@ -679,6 +736,7 @@ export default async (req: Request, _context: Context) =>
       }
       return new Response('Booking needs human — no resolvable calendar', { status: 200 });
     } else if (
+      !bookingBlockedForQualification &&
       bookingAcceptance.acceptanceDetected &&
       calendars.length > 0
     ) {
@@ -716,7 +774,7 @@ export default async (req: Request, _context: Context) =>
       });
       bookingQueued = true;
       tookAction = true;
-    } else if (bookingAcceptance.acceptanceDetected) {
+    } else if (!bookingBlockedForQualification && bookingAcceptance.acceptanceDetected) {
       // No calendars at all — escalate, but only send a system message
       // if the AI didn't already reply (avoid double messages).
       await db.from('conversation_events').insert({
@@ -745,29 +803,50 @@ export default async (req: Request, _context: Context) =>
       return new Response('Needs human', { status: 200 });
     }
 
-    // Intentional silence on a reaction: when the lead's latest inbound is just
-    // an emoji reaction / tapback and the AI deliberately chose not to reply,
-    // stay quiet — don't escalate or send a "team is reviewing" message. Not
-    // replying to a 👍 is the natural, human behaviour.
+    // Intentional silence: when the AI deliberately chose not to reply (and is
+    // neither escalating nor booking), stay quiet — don't escalate or send a
+    // "team is reviewing" message. This covers emoji reactions / tapbacks AND
+    // plain-text sign-offs like "sweet" or "Will do!". Not replying to those is
+    // the natural, human behaviour. The canned hand-off message below is
+    // reserved for genuine no-action failures (e.g. the AI wanted to reply but
+    // produced no text).
     if (
       !tookAction &&
       !bookingQueued &&
       !decision.should_reply &&
-      !decision.escalate_to_human &&
-      latestInboundReaction
+      !decision.escalate_to_human
     ) {
       await db.from('conversation_events').insert({
         conversation_id,
-        event_type: 'ai_skipped_reaction',
+        event_type: latestInboundReaction ? 'ai_skipped_reaction' : 'ai_skipped_no_reply',
         event_payload_json: {
-          reaction_kind: latestInboundReaction.kind,
-          reaction_description: latestInboundReaction.description,
+          ...(latestInboundReaction
+            ? {
+                reaction_kind: latestInboundReaction.kind,
+                reaction_description: latestInboundReaction.description,
+              }
+            : {}),
           qualification_state: decision.qualification_state,
           reason_summary: decision.reason_summary,
         },
       });
-      await conversationService.updateStatus(conversation_id, ConversationStatus.WaitingForLead);
-      return new Response('Skipped reaction — no reply needed', { status: 200 });
+      // A lead who has disqualified themselves (e.g. "I don't have a business")
+      // is done — close the thread as Completed (the Unqualified outcome was
+      // already recorded above). Everyone else (sign-offs, acknowledgements like
+      // "sweet" or "Will do!") may still re-engage, so leave them waiting.
+      const leadIsUnqualified = decision.qualification_state === 'unqualified';
+      await conversationService.updateStatus(
+        conversation_id,
+        leadIsUnqualified ? ConversationStatus.Completed : ConversationStatus.WaitingForLead,
+      );
+      return new Response(
+        leadIsUnqualified
+          ? 'Skipped — lead unqualified, no reply needed'
+          : latestInboundReaction
+            ? 'Skipped reaction — no reply needed'
+            : 'Skipped — AI chose not to reply',
+        { status: 200 },
+      );
     }
 
     if (!tookAction && trigger === 'inbound_message') {
@@ -784,16 +863,31 @@ export default async (req: Request, _context: Context) =>
         },
       });
       await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
-      try {
-        await queueSystemMessage(queueService, db, {
-          workspaceId: conversation.workspace_id,
-          conversationId: conversation_id,
-          to: lead.phone_e164,
-          bodyText: 'Thanks for the message. A team member is reviewing the next step and will follow up shortly.',
-          sourceJobId: undefined,
-        });
-      } catch (err) {
-        console.error('Failed to queue ai-no-action SMS:', err);
+
+      // Notify the team via webhook so a human can pick this up. As with the
+      // other escalation paths, don't text the lead a holding line unless they
+      // have actually engaged — texting a cold thread (lead never replied)
+      // breaks the human persona.
+      await enqueueEscalationNotification(queueService, {
+        workspaceId: conversation.workspace_id,
+        conversationId: conversation_id,
+        reason: 'ai_no_action',
+        shouldBook: decision.should_book,
+        qualificationState: decision.qualification_state,
+      });
+
+      if (lastInbound) {
+        try {
+          await queueSystemMessage(queueService, db, {
+            workspaceId: conversation.workspace_id,
+            conversationId: conversation_id,
+            to: lead.phone_e164,
+            bodyText: ENGAGED_ESCALATION_MESSAGE,
+            sourceJobId: undefined,
+          });
+        } catch (err) {
+          console.error('Failed to queue ai-no-action SMS:', err);
+        }
       }
       return new Response('Needs human', { status: 200 });
     }
@@ -863,6 +957,32 @@ export default async (req: Request, _context: Context) =>
 
     return new Response('OK', { status: 200 });
   });
+
+/**
+ * Has this lead ever been explicitly assessed as `qualified`? True if the
+ * current decision says so, or if any earlier AI turn in this conversation did.
+ * Qualification is sticky: once a lead qualifies they stay eligible to book even
+ * if a later turn (e.g. them just picking a time) reads as a softer state. This
+ * is the authority behind the booking gate — booking is only ever allowed when
+ * this returns true.
+ */
+async function hasReachedQualified(
+  db: { from: (table: string) => ReturnType<import('@supabase/supabase-js').SupabaseClient['from']> },
+  conversationId: string,
+  currentDecision: AIDecision,
+): Promise<boolean> {
+  if (currentDecision.qualification_state === QualificationState.Qualified) return true;
+
+  const { data } = await db
+    .from('conversation_events')
+    .select('id')
+    .eq('conversation_id', conversationId)
+    .eq('event_type', ConversationEventType.AIReplyGenerated)
+    .eq('event_payload_json->>qualification_state', QualificationState.Qualified)
+    .limit(1);
+
+  return Array.isArray(data) && data.length > 0;
+}
 
 /**
  * Enqueue a team-facing escalation notification (POSTs to the escalation

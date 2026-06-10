@@ -37,6 +37,7 @@
             <tr>
               <th>Campaign</th>
               <th>Conversations</th>
+              <th>Engaged</th>
               <th>Booked</th>
               <th>Booking Rate</th>
               <th>Qualified</th>
@@ -47,6 +48,10 @@
             <tr v-for="campaign in campaigns" :key="campaign.campaign_id">
               <td class="font-medium">{{ campaign.campaign_name }}</td>
               <td>{{ campaign.total_conversations }}</td>
+              <td>
+                {{ campaign.engaged_conversations }}
+                <span class="text-zinc-400">({{ formatPct(campaignReplyRate(campaign)) }})</span>
+              </td>
               <td>{{ campaign.booked }}</td>
               <td>
                 <span
@@ -182,6 +187,7 @@ interface CampaignMetric {
   campaign_id: string;
   campaign_name: string;
   total_conversations: number;
+  engaged_conversations: number;
   active_conversations: number;
   booked: number;
   qualified_not_booked: number;
@@ -218,6 +224,11 @@ function formatPct(rate: number): string {
 function campaignBookingRate(campaign: CampaignMetric): number {
   if (campaign.total_conversations === 0) return 0;
   return campaign.booked / campaign.total_conversations;
+}
+
+function campaignReplyRate(campaign: CampaignMetric): number {
+  if (campaign.total_conversations === 0) return 0;
+  return campaign.engaged_conversations / campaign.total_conversations;
 }
 
 function isBestBooking(campaign: CampaignMetric, agent: AgentMetric): boolean {

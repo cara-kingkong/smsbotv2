@@ -42,3 +42,5 @@ npm-debug.log*
 
 # Supabase local
 supabase/.temp/
+
+scripts/csv
