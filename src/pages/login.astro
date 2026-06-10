@@ -70,10 +70,13 @@ const passwordLoginEnabled =
           flowType: 'pkce',
           storage: window.localStorage,
           storageKey: 'sb-auth-token',
-          // Cookies are the source of truth. Don't let the browser library
-          // persist or background-rotate the session in localStorage — that
-          // desync invalidated the cookie refresh token and forced re-login.
-          persistSession: false,
+          // persistSession MUST stay true: when false, auth-js ignores the
+          // `storage` option and uses an in-memory adapter, which loses the
+          // PKCE code verifier across the OAuth redirect and breaks login.
+          // We only disable autoRefreshToken — that background rotation is what
+          // desynced the cookie token and forced early re-login. Cookies remain
+          // the source of truth; the middleware is the only token refresher.
+          persistSession: true,
           autoRefreshToken: false,
         },
       });

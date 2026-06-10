@@ -34,10 +34,12 @@ const publicConfig = getPublicSupabaseConfig();
           detectSessionInUrl: false,
           storage: window.localStorage,
           storageKey: 'sb-auth-token',
-          // Keep localStorage only for the PKCE code verifier (stored
-          // independently of persistSession). Don't persist or auto-rotate the
-          // session — we hand the returned session straight to cookies below.
-          persistSession: false,
+          // persistSession MUST stay true: when false, auth-js ignores the
+          // `storage` option and uses an in-memory adapter, so exchangeCodeForSession
+          // can't read the PKCE code verifier that login.astro wrote to
+          // localStorage — the exchange fails and we bounce back to /login.
+          // Only autoRefreshToken is disabled (that rotation caused early logouts).
+          persistSession: true,
           autoRefreshToken: false,
         },
       });
