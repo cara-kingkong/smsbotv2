@@ -345,6 +345,11 @@ export interface AIDecision {
   confirmed_time: string | null;
   recommended_calendar_id: string | null;
   escalate_to_human: boolean;
+  /** The lead asked to be removed / unsubscribed / not contacted again, phrased
+   *  in natural language the deterministic keyword check can miss. When true the
+   *  system records the opt-out (OptedOut outcome, leads.opted_out, CRM
+   *  unsubscribe event) — the AI safety net for compliance. */
+  request_removal: boolean;
   tags_to_emit: string[];
   confidence_notes: string[];
   reason_summary: string;

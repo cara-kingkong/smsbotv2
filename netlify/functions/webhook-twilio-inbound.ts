@@ -4,10 +4,9 @@ import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
 import { MessagingService } from '../../src/lib/messaging/service';
 import { PhoneNumberService } from '../../src/lib/messaging/phone-numbers';
 import { QueueService } from '../../src/lib/queues/service';
-import { ConversationOutcome, ConversationStatus, CRMEventType } from '../../src/lib/types';
+import { ConversationStatus } from '../../src/lib/types';
 import { ConversationService } from '../../src/lib/conversations/service';
-import { CRMService } from '../../src/lib/crm/service';
-import { buildConversationNote } from '../../src/lib/crm/notes';
+import { recordOptOut } from '../../src/lib/conversations/opt-out';
 import { isOptOut } from '../../src/lib/utils/opt-out';
 
 /**
@@ -201,59 +200,13 @@ export default async (req: Request, _context: Context) => {
     // "Unsubscribe - sold business". "cancel" is excluded — leads use it to
     // cancel bookings, not to opt out. See isOptOut for the matching rules.
     if (isOptOut(inbound.body)) {
-      await conversationService.setOutcome(conversation.id, ConversationOutcome.OptedOut);
-      await conversationService.updateStatus(conversation.id, ConversationStatus.OptedOut);
-      await db.from('leads').update({ opted_out: true }).eq('id', lead.id);
-
-      // Emit CRM event for opt-out
-      if (lead.external_contact_id) {
-        const { data: crmIntegration } = await db
-          .from('integrations')
-          .select('id, provider')
-          .eq('workspace_id', lead.workspace_id)
-          .eq('type', 'crm')
-          .eq('status', 'active')
-          .limit(1)
-          .single();
-
-        if (crmIntegration) {
-          // Per-campaign tag mapping + name for the note subheading.
-          const { data: campaignRow } = await db
-            .from('campaigns')
-            .select('name, crm_tag_mappings_json')
-            .eq('id', conversation.campaign_id)
-            .maybeSingle();
-          const tagMappings = (campaignRow?.crm_tag_mappings_json ?? {}) as Record<string, string>;
-          const mappedTag = (tagMappings[CRMEventType.ConversationOptedOut] ?? '').toString().trim();
-
-          const noteBody = await buildConversationNote(db, conversation.id, {
-            headline: 'Lead OPTED OUT of SMS chatbot',
-            subheading: campaignRow?.name ? `Campaign: ${campaignRow.name}` : undefined,
-          });
-
-          const crmService = new CRMService(db, new Map());
-          const crmEvent = await crmService.emitEvent({
-            workspace_id: lead.workspace_id,
-            conversation_id: conversation.id,
-            integration_id: crmIntegration.id,
-            event_type: CRMEventType.ConversationOptedOut,
-            external_contact_id: lead.external_contact_id,
-            payload: {
-              external_contact_id: lead.external_contact_id,
-              tag_name: mappedTag || null,
-              note_body: noteBody,
-            },
-          });
-
-          const queueService = new QueueService(db);
-          await queueService.enqueue({
-            workspace_id: lead.workspace_id,
-            job_type: 'process_crm_sync',
-            queue_name: 'crm',
-            payload: { crm_event_id: crmEvent.id, provider: crmIntegration.provider },
-          });
-        }
-      }
+      await recordOptOut(db, new QueueService(db), {
+        conversationId: conversation.id,
+        campaignId: conversation.campaign_id,
+        workspaceId: lead.workspace_id,
+        leadId: lead.id,
+        externalContactId: lead.external_contact_id,
+      });
 
       if (receiptId) {
         await db.from('webhook_receipts').update({ processed_status: 'completed' }).eq('id', receiptId);

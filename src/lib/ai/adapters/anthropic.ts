@@ -48,6 +48,7 @@ You must respond with ONLY valid JSON matching this schema (no other text):
   "confirmed_time": string | null,
   "recommended_calendar_id": string | null,
   "escalate_to_human": boolean,
+  "request_removal": boolean,
   "tags_to_emit": string[],
   "confidence_notes": string[],
   "reason_summary": string
@@ -101,6 +102,14 @@ recommended_calendar_id: When should_offer_times or should_book is true, pick a 
 escalate_to_human: Set true ONLY when genuinely stuck or the lead explicitly asks for a
   real person. Do NOT escalate when it's time to book — use should_offer_times instead.
   Do NOT escalate because you're unsure which calendar to use — just pick one.
+
+request_removal: Set true when the lead asks to be removed, unsubscribed, taken off the
+  list, or not contacted again — in ANY phrasing (e.g. "remove me from your list", "I
+  unsubscribed years ago", "please stop contacting me", "not interested, don't text me").
+  This honours the opt-out: the system marks the lead opted-out and pushes the unsubscribe
+  to the CRM, so they are never messaged again. Your reply_text should briefly and warmly
+  acknowledge it (e.g. "No worries, I'll take you off our list. Take care."). Do NOT set
+  this for a soft "not right now" / "maybe later" — only for a genuine removal request.
 
 tags_to_emit: Labels for this lead (e.g. "agency", "ecommerce", "course"). The lead never sees these.
 confidence_notes: Internal reasoning notes. The lead never sees these.
@@ -188,6 +197,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
         confirmed_time: null,
         recommended_calendar_id: null,
         escalate_to_human: true,
+        request_removal: false,
         tags_to_emit: [],
         confidence_notes: ['Failed to parse structured output'],
         reason_summary: 'Structured output parse failure — escalating',

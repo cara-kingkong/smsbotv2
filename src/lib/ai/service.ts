@@ -127,6 +127,7 @@ export class AIService {
       confirmed_time: typeof raw.confirmed_time === 'string' ? raw.confirmed_time : null,
       recommended_calendar_id: raw.recommended_calendar_id ?? null,
       escalate_to_human: typeof raw.escalate_to_human === 'boolean' ? raw.escalate_to_human : false,
+      request_removal: typeof raw.request_removal === 'boolean' ? raw.request_removal : false,
       tags_to_emit: Array.isArray(raw.tags_to_emit) ? raw.tags_to_emit : [],
       confidence_notes: Array.isArray(raw.confidence_notes) ? raw.confidence_notes : [],
       reason_summary: typeof raw.reason_summary === 'string' ? raw.reason_summary : '',

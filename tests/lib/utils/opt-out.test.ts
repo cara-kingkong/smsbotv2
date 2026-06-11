@@ -35,6 +35,56 @@ describe('isOptOut', () => {
     });
   });
 
+  describe('"unsubscribe" inflections anywhere', () => {
+    it.each([
+      'I have unsubscribed from King Kong years ago, remove me from your list',
+      'I unsubscribed ages ago',
+      'stop, I already unsubscribed',
+      'why am I still getting these, unsubscribing now',
+    ])('opts out: %s', (body) => {
+      expect(isOptOut(body)).toBe(true);
+    });
+  });
+
+  describe('natural-language removal phrases (no bare keyword)', () => {
+    it.each([
+      'Remove me from your list',
+      'please remove me from your list',
+      'can you take me off your list',
+      'take me off this list please',
+      'do not contact me again',
+      "don't contact me",
+      'please stop contacting me',
+      'stop texting me',
+      'stop messaging me please',
+      "don't call me again",
+      'stop emailing me',
+      'do not contact us again',
+      'opt me out',
+      'I want to opt out',
+      'I opted out of this',
+      'delete my number',
+      'remove my number from your database',
+      'this is unsolicited. Remove me from your list.',
+    ])('opts out: %s', (body) => {
+      expect(isOptOut(body)).toBe(true);
+    });
+  });
+
+  describe('similar phrasing that is NOT a removal request', () => {
+    it.each([
+      'remove the first item from my cart',
+      'can you take the discount off the total',
+      'I had to stop by the office',
+      'do not forget to send the details',
+      'delete my old booking and rebook me', // about a booking, not contact removal
+      "don't call it that, call it a strategy session", // "call" without an opt-out object
+      'can you stop texting the wrong number', // object is "the wrong number", not me/us
+    ])('stays active: %s', (body) => {
+      expect(isOptOut(body)).toBe(false);
+    });
+  });
+
   describe('conversational use of ambiguous words (NOT opt-outs)', () => {
     it.each([
       "the end of the day works",

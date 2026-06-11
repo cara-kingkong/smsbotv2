@@ -1,5 +1,6 @@
 import type { Context } from '@netlify/functions';
 import { ConversationService } from '../../src/lib/conversations/service';
+import { recordOptOut } from '../../src/lib/conversations/opt-out';
 import { MessagingService } from '../../src/lib/messaging/service';
 import { AIService } from '../../src/lib/ai/service';
 import { AgentService } from '../../src/lib/agents/service';
@@ -310,6 +311,7 @@ export default async (req: Request, _context: Context) =>
         confirmed_time: null,
         recommended_calendar_id: null,
         escalate_to_human: false,
+        request_removal: false,
         tags_to_emit: [],
         confidence_notes: ['Opening message'],
         reason_summary: 'Initial outbound opener',
@@ -356,6 +358,54 @@ export default async (req: Request, _context: Context) =>
         confirmed_time: decision.confirmed_time,
       },
     });
+
+    // ── Honour an AI-detected removal request (opt-out safety net) ──
+    // The deterministic keyword check at the Twilio webhook catches "STOP",
+    // "unsubscribe", "remove me from your list", etc. This handles the long tail
+    // it can't — natural-language opt-outs the model understands but no regex
+    // reliably matches ("I unsubscribed years ago, take me off").
+    //
+    // Record the opt-out FIRST, then send the AI's acknowledgement. Marking the
+    // lead opted-out (and firing the CRM unsubscribe) is the compliance-critical
+    // step; the ack SMS is courtesy. If the send throws after we've recorded the
+    // opt-out, the lead is still correctly suppressed. Returns early —
+    // booking/qualification/CRM-unqualified logic below must not run for a lead
+    // who just asked to leave.
+    if (decision.request_removal) {
+      await recordOptOut(db, queueService, {
+        conversationId: conversation_id,
+        campaignId: conversation.campaign_id,
+        workspaceId: conversation.workspace_id,
+        leadId: lead.id,
+        externalContactId: lead.external_contact_id,
+      });
+
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: ConversationEventType.AIOptOutDetected,
+        event_payload_json: { reason_summary: decision.reason_summary },
+      });
+
+      if (decision.should_reply && decision.reply_text) {
+        await heartbeat();
+        const message = await messagingService.sendOutbound({
+          conversation_id,
+          to: lead.phone_e164,
+          from: fromNumber,
+          body_text: decision.reply_text,
+          sender_type: SenderType.AI,
+          source_job_id: jobId,
+        });
+        await db.from('ai_decisions')
+          .update({ message_id: message.id })
+          .eq('conversation_id', conversation_id)
+          .is('message_id', null)
+          .order('created_at', { ascending: false })
+          .limit(1);
+      }
+
+      return new Response('Opted out', { status: 200 });
+    }
 
     // ── Persist qualification outcome so it rolls up to dashboard ──
     // Booked takes precedence; otherwise promote the AI's assessment.

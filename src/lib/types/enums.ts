@@ -118,6 +118,7 @@ export enum ConversationEventType {
   Paused = 'paused',
   Resumed = 'resumed',
   OptedOut = 'opted_out',
+  AIOptOutDetected = 'ai_opt_out_detected',
   Completed = 'completed',
   Failed = 'failed',
 }
