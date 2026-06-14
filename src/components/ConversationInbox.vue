@@ -17,11 +17,28 @@
             v-for="f in filters"
             :key="f.value"
             class="pill-tab"
-            :class="currentFilter === f.value ? 'pill-tab-active' : ''"
+            :class="isPillActive(f.value) ? 'pill-tab-active' : ''"
             @click="setFilter(f.value)"
           >
             {{ f.label }}
           </button>
+        </div>
+
+        <!-- Context filters carried in from the dashboard (campaign-scoped
+             outcomes, an agent split, or the live "active" group). -->
+        <div v-if="hasContextFilters" class="mt-2 flex flex-wrap items-center gap-1">
+          <span v-if="agentChipLabel" class="filter-chip">
+            Agent: {{ agentChipLabel }}
+            <button type="button" aria-label="Clear agent filter" @click="clearAgent">&times;</button>
+          </span>
+          <span v-if="outcomeChipLabel" class="filter-chip">
+            {{ outcomeChipLabel }}
+            <button type="button" aria-label="Clear outcome filter" @click="clearOutcome">&times;</button>
+          </span>
+          <span v-else-if="metricChipLabel" class="filter-chip">
+            {{ metricChipLabel }}
+            <button type="button" aria-label="Clear filter" @click="clearMetric">&times;</button>
+          </span>
         </div>
       </div>
 
@@ -242,8 +259,26 @@ const loading = ref(true);
 const conversations = ref<Conv[]>([]);
 const loadError = ref('');
 const currentFilter = ref('');
+const currentOutcome = ref('');
+const currentAgent = ref('');
+const currentAgentName = ref('');
 const campaigns = ref<{ id: string; name: string }[]>([]);
 const currentCampaign = ref('');
+
+// Status/engaged values that have a dedicated pill in the tab bar. Filters set
+// via dashboard deep-links (outcomes, agent, the "active" group) have no pill
+// and are surfaced as removable chips instead.
+const PILL_VALUES = new Set(['', 'engaged', 'needs_human', 'human_controlled', 'completed']);
+
+const OUTCOME_LABELS: Record<string, string> = {
+  booked: 'Booked',
+  qualified_not_booked: 'Qualified',
+  unqualified: 'Unqualified',
+  no_response: 'No response',
+  opted_out: 'Opted out',
+  human_takeover: 'Needs human',
+  other: 'Other',
+};
 const selectedId = ref<string | null>(null);
 const selected = ref<Conv | null>(null);
 const messages = ref<Msg[]>([]);
@@ -276,6 +311,32 @@ const bannerText = computed(() => {
   if (selected.value.human_controlled) return 'You are currently controlling this conversation manually.';
   return 'AI is currently managing this conversation.';
 });
+
+// A pill is only highlighted when it owns the active metric — i.e. no outcome
+// chip is in play and the filter value maps to a real pill.
+function isPillActive(value: string): boolean {
+  return currentFilter.value === value && !currentOutcome.value;
+}
+
+// Label for the metric chip shown when the active filter has no pill (the
+// "active" status group). Outcome and agent chips are handled separately.
+const metricChipLabel = computed(() => {
+  if (currentFilter.value === 'active') return 'Active (live)';
+  if (currentFilter.value && !PILL_VALUES.has(currentFilter.value)) {
+    return currentFilter.value.replace(/_/g, ' ');
+  }
+  return '';
+});
+
+const outcomeChipLabel = computed(() =>
+  currentOutcome.value ? OUTCOME_LABELS[currentOutcome.value] ?? currentOutcome.value.replace(/_/g, ' ') : '',
+);
+
+const agentChipLabel = computed(() => (currentAgent.value ? currentAgentName.value || 'Selected agent' : ''));
+
+const hasContextFilters = computed(
+  () => Boolean(metricChipLabel.value || outcomeChipLabel.value || agentChipLabel.value),
+);
 
 function leadName(conv: Conv): string {
   const l = conv.lead;
@@ -364,10 +425,14 @@ async function fetchConversations() {
   const params = new URLSearchParams({ workspace_id: workspaceId });
   if (currentFilter.value === 'engaged') {
     params.set('engaged', 'true');
+  } else if (currentFilter.value === 'active') {
+    params.set('active', 'true');
   } else if (currentFilter.value) {
     params.set('status', currentFilter.value);
   }
+  if (currentOutcome.value) params.set('outcome', currentOutcome.value);
   if (currentCampaign.value) params.set('campaign_id', currentCampaign.value);
+  if (currentAgent.value) params.set('agent_id', currentAgent.value);
   const res = await fetch(`${API_BASE}/api-inbox-list?${params}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: 'Failed to load conversations' }));
@@ -400,10 +465,44 @@ function scrollToBottom() {
 
 function setFilter(val: string) {
   currentFilter.value = val;
+  // Pills own the status/engaged axis; selecting one clears any deep-linked
+  // outcome filter so the two never silently stack.
+  currentOutcome.value = '';
   selectedId.value = null;
   selected.value = null;
   messages.value = [];
   fetchConversations();
+}
+
+function clearOutcome() {
+  currentOutcome.value = '';
+  if (currentFilter.value === 'active') currentFilter.value = '';
+  fetchConversations();
+}
+
+function clearMetric() {
+  currentFilter.value = '';
+  fetchConversations();
+}
+
+function clearAgent() {
+  currentAgent.value = '';
+  currentAgentName.value = '';
+  fetchConversations();
+}
+
+async function openById(id: string) {
+  let conv = conversations.value.find((c) => c.id === id);
+  if (!conv) {
+    const res = await fetch(
+      `${API_BASE}/api-inbox-list?workspace_id=${workspaceId}&conversation_id=${id}&include_test=true`,
+    );
+    if (res.ok) {
+      const arr = (await res.json()) as Conv[];
+      conv = arr[0];
+    }
+  }
+  if (conv) await select(conv);
 }
 
 function onCampaignChange() {
@@ -504,14 +603,34 @@ async function send() {
   replyRef.value?.focus();
 }
 
+function applyDeepLink(): string | null {
+  const sp = new URLSearchParams(window.location.search);
+  currentCampaign.value = sp.get('campaign_id') ?? '';
+  currentAgent.value = sp.get('agent_id') ?? '';
+  currentAgentName.value = sp.get('agent_name') ?? '';
+  currentOutcome.value = sp.get('outcome') ?? '';
+
+  if (sp.get('engaged') === 'true') {
+    currentFilter.value = 'engaged';
+  } else if (sp.get('active') === 'true') {
+    currentFilter.value = 'active';
+  } else {
+    currentFilter.value = sp.get('status') ?? '';
+  }
+
+  return sp.get('id');
+}
+
 onMounted(async () => {
   workspaceId = resolveWorkspace();
   if (!workspaceId) {
     loading.value = false;
     return;
   }
+  const openId = applyDeepLink();
   await Promise.all([fetchConversations(), fetchCampaigns()]);
   loading.value = false;
+  if (openId) await openById(openId);
 
   const poll = async () => {
     if (document.hidden) return; // Skip polling when tab is not visible

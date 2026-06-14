@@ -1,6 +1,6 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
-import { ConversationStatus } from '../../src/lib/types';
+import { ConversationStatus, ConversationOutcome } from '../../src/lib/types';
 import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 
 /**
@@ -21,6 +21,8 @@ export default async (req: Request, _context: Context) => {
     if (access instanceof Response) return access;
 
     const statusFilter = url.searchParams.get('status');
+    const outcomeFilter = url.searchParams.get('outcome');
+    const conversationId = url.searchParams.get('conversation_id');
     const parsedLimit = Number.parseInt(url.searchParams.get('limit') ?? '50', 10);
     const parsedOffset = Number.parseInt(url.searchParams.get('offset') ?? '0', 10);
     const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 50;
@@ -46,15 +48,27 @@ export default async (req: Request, _context: Context) => {
       );
     }
 
+    const allowedOutcomes = Object.values(ConversationOutcome);
+    if (outcomeFilter && !allowedOutcomes.includes(outcomeFilter as ConversationOutcome)) {
+      return new Response(
+        JSON.stringify({ error: `Invalid outcome filter. Allowed: ${allowedOutcomes.join(', ')}` }),
+        { status: 400 },
+      );
+    }
+
     const includeTest = url.searchParams.get('include_test') === 'true';
     const engaged = url.searchParams.get('engaged') === 'true';
+    // "Active" = a live thread the team may still need to act on. Mirrors the
+    // active_conversations metric on the dashboard (status-group based).
+    const activeGroup = url.searchParams.get('active') === 'true';
     const campaignId = url.searchParams.get('campaign_id');
+    const agentId = url.searchParams.get('agent_id');
 
     let query = db
       .from('conversations')
       .select(`
         id, status, human_controlled, needs_human, last_activity_at, outcome,
-        campaign_id, has_lead_reply,
+        campaign_id, agent_id, has_lead_reply,
         last_message_preview, last_message_sender_type, last_message_at,
         lead:leads(id, first_name, last_name, phone_e164, email)
       `)
@@ -63,25 +77,49 @@ export default async (req: Request, _context: Context) => {
       .order('last_activity_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (!includeTest) {
-      query = query.eq('is_test', false);
-    }
+    // Deep-link to a single conversation (e.g. opening a thread from the
+    // dashboard). Identity overrides every other filter so the thread always
+    // resolves regardless of which list filters were active.
+    if (conversationId) {
+      query = query.eq('id', conversationId);
+    } else {
+      if (!includeTest) {
+        query = query.eq('is_test', false);
+      }
 
-    if (statusFilter) {
-      query = query.eq('status', statusFilter);
-    }
+      if (statusFilter) {
+        query = query.eq('status', statusFilter);
+      }
 
-    // "Engaged" = the lead has actually replied at least once, on a thread
-    // that is still ongoing (not closed/opted-out/failed). Powers the
-    // redefined "Active" tab, which previously matched only status='active'.
-    if (engaged) {
-      query = query
-        .eq('has_lead_reply', true)
-        .not('status', 'in', '(completed,opted_out,failed)');
-    }
+      // "Engaged" = the lead has actually replied at least once, on a thread
+      // that is still ongoing (not closed/opted-out/failed). Powers the
+      // redefined "Active" tab, which previously matched only status='active'.
+      if (engaged) {
+        query = query
+          .eq('has_lead_reply', true)
+          .not('status', 'in', '(completed,opted_out,failed)');
+      }
 
-    if (campaignId) {
-      query = query.eq('campaign_id', campaignId);
+      if (activeGroup) {
+        query = query.in('status', [
+          ConversationStatus.Active,
+          ConversationStatus.WaitingForLead,
+          ConversationStatus.NeedsHuman,
+          ConversationStatus.HumanControlled,
+        ]);
+      }
+
+      if (outcomeFilter) {
+        query = query.eq('outcome', outcomeFilter);
+      }
+
+      if (campaignId) {
+        query = query.eq('campaign_id', campaignId);
+      }
+
+      if (agentId) {
+        query = query.eq('agent_id', agentId);
+      }
     }
 
     const { data: conversations, error } = await query;

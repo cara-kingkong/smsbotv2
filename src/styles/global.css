@@ -529,6 +529,38 @@
     color: white;
   }
 
+  /* Clickable metric value inside a data-table cell — drills through to the
+     filtered conversations view. */
+  .cell-link {
+    @apply font-medium transition duration-150;
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .cell-link:hover {
+    color: var(--brand);
+    text-decoration: underline;
+  }
+
+  /* Removable filter chip used to surface deep-linked context filters. */
+  .filter-chip {
+    @apply inline-flex items-center gap-1 px-2 py-1 text-[12px] font-medium;
+    border-radius: var(--radius-sm);
+    background: var(--surface-muted);
+    color: var(--text-strong);
+  }
+
+  .filter-chip button {
+    @apply leading-none transition duration-150;
+    color: var(--text-muted);
+  }
+
+  .filter-chip button:hover {
+    color: var(--text-strong);
+  }
+
   .form-label {
     @apply mb-2 block text-sm font-semibold;
     color: var(--text-strong);

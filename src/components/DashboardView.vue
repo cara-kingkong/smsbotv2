@@ -6,9 +6,8 @@
       <div
         v-for="stat in statCards"
         :key="stat.key"
-        class="stat-card"
-        :class="stat.clickable ? 'stat-card-clickable' : ''"
-        @click="stat.clickable ? goToConversations() : undefined"
+        class="stat-card stat-card-clickable"
+        @click="openConversations(stat.params)"
       >
         <div class="stat-label">{{ stat.label }}</div>
         <div class="stat-value">
@@ -47,12 +46,22 @@
           <tbody>
             <tr v-for="campaign in campaigns" :key="campaign.campaign_id">
               <td class="font-medium">{{ campaign.campaign_name }}</td>
-              <td>{{ campaign.total_conversations }}</td>
               <td>
-                {{ campaign.engaged_conversations }}
+                <button class="cell-link" @click="openConversations({ campaign_id: campaign.campaign_id })">
+                  {{ campaign.total_conversations }}
+                </button>
+              </td>
+              <td>
+                <button class="cell-link" @click="openConversations({ campaign_id: campaign.campaign_id, engaged: 'true' })">
+                  {{ campaign.engaged_conversations }}
+                </button>
                 <span class="text-zinc-400">({{ formatPct(campaignReplyRate(campaign)) }})</span>
               </td>
-              <td>{{ campaign.booked }}</td>
+              <td>
+                <button class="cell-link" @click="openConversations({ campaign_id: campaign.campaign_id, outcome: 'booked' })">
+                  {{ campaign.booked }}
+                </button>
+              </td>
               <td>
                 <span
                   class="badge"
@@ -61,8 +70,16 @@
                   {{ formatPct(campaignBookingRate(campaign)) }}
                 </span>
               </td>
-              <td>{{ campaign.qualified_not_booked }}</td>
-              <td>{{ campaign.human_takeover }}</td>
+              <td>
+                <button class="cell-link" @click="openConversations({ campaign_id: campaign.campaign_id, outcome: 'qualified_not_booked' })">
+                  {{ campaign.qualified_not_booked }}
+                </button>
+              </td>
+              <td>
+                <button class="cell-link" @click="openConversations({ campaign_id: campaign.campaign_id, outcome: 'human_takeover' })">
+                  {{ campaign.human_takeover }}
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -88,17 +105,43 @@
               <tbody>
                 <tr v-for="agent in campaign.agent_metrics" :key="agent.agent_id">
                   <td class="font-medium">{{ agent.agent_name }}</td>
-                  <td>{{ agent.total_conversations }}</td>
                   <td>
-                    <span
-                      class="badge"
-                      :class="isBestBooking(campaign, agent) ? 'bg-emerald-50 text-emerald-700' : 'bg-zinc-100 text-zinc-500'"
+                    <button
+                      class="cell-link"
+                      @click="openConversations({ campaign_id: campaign.campaign_id, agent_id: agent.agent_id, agent_name: agent.agent_name })"
                     >
-                      {{ formatPct(agent.booking_rate) }}
-                    </span>
+                      {{ agent.total_conversations }}
+                    </button>
                   </td>
-                  <td>{{ formatPct(agent.opt_out_rate) }}</td>
-                  <td>{{ formatPct(agent.human_takeover_rate) }}</td>
+                  <td>
+                    <button
+                      class="cell-link"
+                      @click="openConversations({ campaign_id: campaign.campaign_id, agent_id: agent.agent_id, agent_name: agent.agent_name, outcome: 'booked' })"
+                    >
+                      <span
+                        class="badge"
+                        :class="isBestBooking(campaign, agent) ? 'bg-emerald-50 text-emerald-700' : 'bg-zinc-100 text-zinc-500'"
+                      >
+                        {{ formatPct(agent.booking_rate) }}
+                      </span>
+                    </button>
+                  </td>
+                  <td>
+                    <button
+                      class="cell-link"
+                      @click="openConversations({ campaign_id: campaign.campaign_id, agent_id: agent.agent_id, agent_name: agent.agent_name, outcome: 'opted_out' })"
+                    >
+                      {{ formatPct(agent.opt_out_rate) }}
+                    </button>
+                  </td>
+                  <td>
+                    <button
+                      class="cell-link"
+                      @click="openConversations({ campaign_id: campaign.campaign_id, agent_id: agent.agent_id, agent_name: agent.agent_name, outcome: 'human_takeover' })"
+                    >
+                      {{ formatPct(agent.human_takeover_rate) }}
+                    </button>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -139,7 +182,7 @@
               v-for="conv in conversations"
               :key="conv.id"
               class="cursor-pointer"
-              @click="goToConversations()"
+              @click="openConversations({ id: conv.id })"
             >
               <td class="font-medium">{{ leadName(conv) }}</td>
               <td class="text-zinc-500">{{ conv.lead?.phone_e164 ?? '' }}</td>
@@ -204,13 +247,15 @@ const stats = ref<Record<string, number>>({});
 const conversations = ref<Conv[]>([]);
 const campaigns = ref<CampaignMetric[]>([]);
 
-const statCards = [
-  { key: 'total', label: 'Conversations', clickable: false },
-  { key: 'active', label: 'Active', clickable: false },
-  { key: 'booked', label: 'Booked', clickable: false },
-  { key: 'qualified', label: 'Qualified', clickable: false },
-  { key: 'opted_out', label: 'Opt-outs', clickable: false },
-  { key: 'needs_human', label: 'Needs human', clickable: true },
+type ConvFilter = Record<string, string | number | boolean>;
+
+const statCards: { key: string; label: string; params: ConvFilter }[] = [
+  { key: 'total', label: 'Conversations', params: {} },
+  { key: 'active', label: 'Active', params: { active: 'true' } },
+  { key: 'booked', label: 'Booked', params: { outcome: 'booked' } },
+  { key: 'qualified', label: 'Qualified', params: { outcome: 'qualified_not_booked' } },
+  { key: 'opted_out', label: 'Opt-outs', params: { outcome: 'opted_out' } },
+  { key: 'needs_human', label: 'Needs human', params: { outcome: 'human_takeover' } },
 ];
 
 const campaignsWithAgents = computed(() => {
@@ -273,8 +318,19 @@ function relativeTime(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+function openConversations(params: ConvFilter = {}) {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') {
+      qs.set(key, String(value));
+    }
+  }
+  const query = qs.toString();
+  window.location.href = query ? `/conversations?${query}` : '/conversations';
+}
+
 function goToConversations() {
-  window.location.href = '/conversations';
+  openConversations();
 }
 
 function resolveWorkspace(): string | null {
