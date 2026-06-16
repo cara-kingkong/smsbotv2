@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   resolveEscalationWebhookUrl,
   notifyEscalation,
+  formatEscalationText,
   type EscalationNotification,
 } from '../../../src/lib/utils/escalation-notify';
 
@@ -54,6 +55,27 @@ describe('resolveEscalationWebhookUrl', () => {
     process.env.ESCALATION_WEBHOOK_URL = '   ';
     delete process.env.GOOGLE_CHAT_WEBHOOK_URL;
     expect(resolveEscalationWebhookUrl()).toBeNull();
+  });
+});
+
+describe('formatEscalationText', () => {
+  it('uses the default "needs a human" header for ai_escalation', () => {
+    const text = formatEscalationText({ ...BASE_PAYLOAD, reason: 'ai_escalation' });
+    expect(text).toContain('Conversation needs a human');
+    expect(text).toContain('AI escalation');
+  });
+
+  it('uses a booked-lead header and label for message_after_booking', () => {
+    const text = formatEscalationText({ ...BASE_PAYLOAD, reason: 'message_after_booking' });
+    expect(text).toContain('Booked lead replied — needs a human');
+    expect(text).toContain('Lead replied after their call was booked');
+    expect(text).not.toContain('Conversation needs a human');
+  });
+
+  it('uses an informational header for reopened_closed_conversation', () => {
+    const text = formatEscalationText({ ...BASE_PAYLOAD, reason: 'reopened_closed_conversation' });
+    expect(text).toContain('Closed conversation got a new message');
+    expect(text).toContain('New message on a previously closed conversation');
   });
 });
 

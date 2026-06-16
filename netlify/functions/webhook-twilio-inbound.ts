@@ -4,7 +4,7 @@ import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
 import { MessagingService } from '../../src/lib/messaging/service';
 import { PhoneNumberService } from '../../src/lib/messaging/phone-numbers';
 import { QueueService } from '../../src/lib/queues/service';
-import { ConversationStatus } from '../../src/lib/types';
+import { ConversationStatus, ConversationOutcome } from '../../src/lib/types';
 import { ConversationService } from '../../src/lib/conversations/service';
 import { recordOptOut } from '../../src/lib/conversations/opt-out';
 import { isOptOut } from '../../src/lib/utils/opt-out';
@@ -153,6 +153,16 @@ export default async (req: Request, _context: Context) => {
     let conversation = activeConversation;
     console.log(`[Inbound] Lead ${lead.id} — active conversation: ${activeConversation?.id ?? 'none'}`);
 
+    // Track whether this inbound landed on a conversation that had already
+    // closed (no active thread, so we fell into the re-open branch below), and
+    // whether that closed conversation was already booked. Both drive the
+    // team notification + booked-lead routing handled after we record the
+    // message.
+    let reopenedFromClosed = false;
+    let reopenWasBooked = false;
+    let reopenPreviousStatus: string | null = null;
+    let reopenPreviousOutcome: string | null = null;
+
     // If no active conversation, re-open the most recent one (except opted-out)
     if (!conversation) {
       // Debug: check what conversations exist for this lead
@@ -167,7 +177,7 @@ export default async (req: Request, _context: Context) => {
 
       const { data: previousConversation } = await db
         .from('conversations')
-        .select('id, status, human_controlled, agent_version_id, campaign_id')
+        .select('id, status, outcome, human_controlled, agent_version_id, campaign_id')
         .eq('lead_id', lead.id)
         .neq('status', ConversationStatus.OptedOut)
         .is('deleted_at', null)
@@ -178,9 +188,25 @@ export default async (req: Request, _context: Context) => {
       console.log(`[Inbound] Re-open candidate:`, previousConversation);
 
       if (previousConversation) {
-        console.log(`[Inbound] Re-opening conversation ${previousConversation.id} (was ${previousConversation.status}) for lead ${lead.id}`);
-        await conversationService.updateStatus(previousConversation.id, ConversationStatus.Active);
-        conversation = { ...previousConversation, status: ConversationStatus.Active, human_controlled: false };
+        reopenedFromClosed = true;
+        reopenPreviousStatus = previousConversation.status;
+        reopenPreviousOutcome = previousConversation.outcome ?? null;
+        reopenWasBooked = previousConversation.outcome === ConversationOutcome.Booked;
+
+        if (reopenWasBooked) {
+          // The lead already has a confirmed booking. Do NOT silently re-open
+          // the thread back into the AI flow — re-running booking would offer
+          // times again and can cancel/rebook their existing slot (see
+          // process-booking-background). Keep the conversation reference so we
+          // still honour opt-out and record the message, but route to a human
+          // (handled after recordInbound) instead of the AI.
+          console.log(`[Inbound] Message on BOOKED conversation ${previousConversation.id} — routing to human, not re-opening for AI`);
+          conversation = { ...previousConversation, human_controlled: false };
+        } else {
+          console.log(`[Inbound] Re-opening conversation ${previousConversation.id} (was ${previousConversation.status}) for lead ${lead.id}`);
+          await conversationService.updateStatus(previousConversation.id, ConversationStatus.Active);
+          conversation = { ...previousConversation, status: ConversationStatus.Active, human_controlled: false };
+        }
       }
     }
 
@@ -225,6 +251,44 @@ export default async (req: Request, _context: Context) => {
       body_text: inbound.body,
       provider_message_id: inbound.provider_message_id,
     });
+
+    // A message landed on a conversation that had already closed (we only get
+    // here via the re-open branch above). Notify the team out-of-band, and for
+    // an already-booked lead route to a human instead of the AI — re-running
+    // the booking flow would re-offer times and can cancel their confirmed slot.
+    if (reopenedFromClosed) {
+      const reopenQueue = new QueueService(db);
+      await db.from('conversation_events').insert({
+        conversation_id: conversation.id,
+        event_type: reopenWasBooked ? 'message_after_booking' : 'reopened_closed_conversation',
+        event_payload_json: {
+          previous_status: reopenPreviousStatus,
+          previous_outcome: reopenPreviousOutcome,
+        },
+      });
+      await reopenQueue.enqueue({
+        workspace_id: lead.workspace_id,
+        job_type: 'notify_escalation',
+        queue_name: 'default',
+        payload: {
+          conversation_id: conversation.id,
+          reason: reopenWasBooked ? 'message_after_booking' : 'reopened_closed_conversation',
+          should_book: false,
+          qualification_state: null,
+        },
+      });
+
+      if (reopenWasBooked) {
+        await conversationService.updateStatus(conversation.id, ConversationStatus.NeedsHuman);
+        if (receiptId) {
+          await db.from('webhook_receipts').update({ processed_status: 'completed' }).eq('id', receiptId);
+        }
+        return new Response('<Response></Response>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/xml' },
+        });
+      }
+    }
 
     // Keep the conversation status aligned with who owns the thread.
     await conversationService.updateStatus(

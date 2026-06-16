@@ -479,6 +479,42 @@ export default async (req: Request, _context: Context) =>
       decision.should_reply = true;
     }
 
+    // ── Already-booked guard (defense in depth) ──────────────────
+    // This conversation already has a confirmed, un-cancelled booking. The
+    // Twilio webhook routes most post-booking messages straight to a human, but
+    // if a booked thread is still being processed by the AI for any reason
+    // (e.g. a manual release back to AI, or a race with the booking job), never
+    // let the model re-offer times or create a second booking off another
+    // affirmative ("Yes", "thanks") — a rebook cancels the existing slot (see
+    // process-booking-background). Only an explicit cancel is allowed to touch
+    // the booking; any other re-book attempt is handed to a human instead.
+    if (
+      !decision.should_cancel_booking &&
+      (decision.should_offer_times || decision.should_book || bookingAcceptance.acceptanceDetected) &&
+      (await hasActiveBooking(db, conversation_id))
+    ) {
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: 'booking_re_attempt_blocked',
+        event_payload_json: {
+          qualification_state: decision.qualification_state,
+          attempted_should_offer_times: decision.should_offer_times,
+          attempted_should_book: decision.should_book,
+          acceptance_fallback: bookingAcceptance.acceptanceDetected,
+          trigger: trigger ?? null,
+        },
+      });
+      await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
+      await enqueueEscalationNotification(queueService, {
+        workspaceId: conversation.workspace_id,
+        conversationId: conversation_id,
+        reason: 'message_after_booking',
+        shouldBook: decision.should_book,
+        qualificationState: decision.qualification_state,
+      });
+      return new Response('Already booked — re-book attempt blocked, routed to human', { status: 200 });
+    }
+
     // ── Phase 1: Offer available time slots ──────────────────────
     if (decision.should_offer_times && !decision.should_book && calendars.length > 0) {
       const slotsCalendar = calendars[0];
@@ -1032,6 +1068,44 @@ async function hasReachedQualified(
     .limit(1);
 
   return Array.isArray(data) && data.length > 0;
+}
+
+/**
+ * Does this conversation currently hold a confirmed, un-cancelled booking?
+ * True when the most recent `booking_reference` event is newer than the most
+ * recent `booking_cancelled` event (or no cancellation exists). Used as the
+ * backstop that stops the AI re-offering times or rebooking on a thread that
+ * is already booked — a rebook cancels the lead's existing slot.
+ */
+async function hasActiveBooking(
+  db: { from: (table: string) => ReturnType<import('@supabase/supabase-js').SupabaseClient['from']> },
+  conversationId: string,
+): Promise<boolean> {
+  const [refsResult, cancelsResult] = await Promise.all([
+    db.from('conversation_events')
+      .select('created_at')
+      .eq('conversation_id', conversationId)
+      .eq('event_type', 'booking_reference')
+      .order('created_at', { ascending: false })
+      .limit(1),
+    db.from('conversation_events')
+      .select('created_at')
+      .eq('conversation_id', conversationId)
+      .eq('event_type', 'booking_cancelled')
+      .order('created_at', { ascending: false })
+      .limit(1),
+  ]);
+
+  const refs = refsResult.data as Array<{ created_at: string }> | null;
+  const cancels = cancelsResult.data as Array<{ created_at: string }> | null;
+
+  const latestRef = refs && refs.length > 0 ? refs[0].created_at : null;
+  if (!latestRef) return false;
+
+  const latestCancel = cancels && cancels.length > 0 ? cancels[0].created_at : null;
+  if (!latestCancel) return true;
+
+  return new Date(latestRef).getTime() > new Date(latestCancel).getTime();
 }
 
 /**

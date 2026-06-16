@@ -48,6 +48,21 @@ const REASON_LABELS: Record<string, string> = {
   ai_escalation: 'AI escalation',
   no_assigned_calendar: 'No calendar assigned to campaign',
   ambiguous_calendar_selection: 'Ambiguous calendar selection',
+  message_after_booking: 'Lead replied after their call was booked',
+  reopened_closed_conversation: 'New message on a previously closed conversation',
+};
+
+/**
+ * Header line per reason. Most escalations genuinely need a human, so the
+ * default frames it that way. A couple of reasons are different in kind:
+ *  - message_after_booking: the lead is already booked, so the AI is held back
+ *    (re-booking would cancel their slot) and a human should handle the reply.
+ *  - reopened_closed_conversation: informational — the AI is re-engaging a lead
+ *    who messaged after the thread closed; surfaced so the team is aware.
+ */
+const REASON_HEADERS: Record<string, string> = {
+  message_after_booking: '*📅 Booked lead replied — needs a human*',
+  reopened_closed_conversation: '*💬 Closed conversation got a new message*',
 };
 
 /**
@@ -65,9 +80,10 @@ export function resolveEscalationWebhookUrl(_workspaceId?: string): string | nul
 export function formatEscalationText(payload: EscalationNotification): string {
   const leadName = [payload.lead.first_name, payload.lead.last_name].filter(Boolean).join(' ') || 'Unknown lead';
   const reasonLabel = REASON_LABELS[payload.reason] ?? payload.reason;
+  const header = REASON_HEADERS[payload.reason] ?? '*🔔 Conversation needs a human*';
 
   const lines = [
-    `*🔔 Conversation needs a human* — ${reasonLabel}`,
+    `${header} — ${reasonLabel}`,
     `*Lead:* ${leadName} (${payload.lead.phone})`,
     `*Qualification:* ${payload.qualification_state ?? 'unknown'} · *Wanted to book:* ${payload.should_book ? 'yes' : 'no'} · *Lead engaged:* ${payload.lead_engaged ? 'yes' : 'no (never replied)'}`,
   ];
