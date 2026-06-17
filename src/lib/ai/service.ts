@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AIProviderAdapter, AIPromptContext, AIDecision, AgentVersion, Message, Lead } from '@lib/types';
 import { QualificationState, MessageDirection } from '@lib/types';
 import { detectReaction } from '@lib/utils/reaction';
+import { isValidTimezone } from '@lib/utils/timezones';
 
 export class AIService {
   constructor(
@@ -128,6 +129,9 @@ export class AIService {
       recommended_calendar_id: raw.recommended_calendar_id ?? null,
       escalate_to_human: typeof raw.escalate_to_human === 'boolean' ? raw.escalate_to_human : false,
       request_removal: typeof raw.request_removal === 'boolean' ? raw.request_removal : false,
+      // Only accept a model-supplied timezone if it's a real IANA zone; drop
+      // hallucinated/free-text values to null so we never persist garbage.
+      detected_timezone: isValidTimezone(raw.detected_timezone) ? raw.detected_timezone : null,
       tags_to_emit: Array.isArray(raw.tags_to_emit) ? raw.tags_to_emit : [],
       confidence_notes: Array.isArray(raw.confidence_notes) ? raw.confidence_notes : [],
       reason_summary: typeof raw.reason_summary === 'string' ? raw.reason_summary : '',

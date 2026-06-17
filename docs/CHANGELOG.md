@@ -3,6 +3,75 @@
 All notable changes to Kong SMS are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); dates are ISO (YYYY-MM-DD).
 
+## [2026-06-18]
+
+### Fixed
+
+- **Booked leads no longer get re-offered times or have their slot rebooked.**
+  A booked conversation (status Completed, outcome Booked) wasn't in the inbound
+  webhook's "active" set, so a follow-up reply like "Yes" fell into the re-open
+  branch, which force-reactivated it and fed it back to the AI — which
+  re-offered times. Worse, a time reply could cancel and rebook their confirmed
+  slot. The availability pre-check now runs **ahead of** the prior-booking
+  cancellation, so a bad rebook can no longer destroy a confirmed slot.
+
+- **No more booking times Calendly never offered (the 400 loop).** Calendly's
+  booking call only accepts a `start_time` that exactly matches a currently
+  available slot. Two paths violated this: a lead self-proposing a time
+  ("tomorrow 11:30am AWST") that the model turned into a timestamp, and the
+  deterministic acceptance fallback enqueuing a booking with no `confirmed_time`
+  — which defaulted to "now". Either way Calendly returned a 400, burning every
+  retry and dead-lettering the job. Now:
+  - `confirmed_time` is validated against real availability before booking; on a
+    miss the lead is offered real slots to pick from instead of a blind POST.
+  - The "now" fallback is gone — the acceptance path offers slots, or hands to a
+    human when there are none.
+  - A second availability pre-check in `process-booking` acts as a backstop for
+    any other enqueue path and for stale times.
+  - `matchAvailableSlot` snaps a requested time to the slot's canonical ISO
+    (minute precision, timezone-agnostic) so the POST matches exactly.
+  - `AVAILABILITY_WINDOW_DAYS` (14) is shared between offering and validation so
+    the two horizons can't drift; a self-proposed time beyond it degrades to an
+    offer of nearer slots rather than a failure.
+  - Files: `netlify/functions/process-ai-reply-background.ts`,
+    `netlify/functions/process-booking-background.ts`,
+    `src/lib/utils/booking-guard.ts`.
+
+- **Both no-slot failure paths now notify the team.** The "requested time
+  unavailable" and "no available slots" branches enqueue an escalation
+  notification instead of only surfacing in the Needs Human inbox.
+  (`netlify/functions/process-booking-background.ts`,
+  `src/lib/utils/escalation-notify.ts`)
+
+- **Full Calendly error body surfaced in diagnostics.** Calendly 4xx responses
+  are parsed into a concise front-loaded summary (`title — message — [param:
+  detail]`) so the cause survives log/panel truncation, instead of a raw blob
+  that cut off mid-message. (`src/lib/calendar/adapters/calendly.ts`)
+
+### Added
+
+- **Lead timezone detection (fixes AWST/Perth mis-times).** When a lead reveals
+  where they are ("I'm in Brisbane", "11:30am AWST"), the AI resolves it to an
+  IANA zone (`detected_timezone`), which is validated as a real zone before
+  being persisted to the lead and applied the same turn. From then on slot
+  offers, business-hours filtering, booking, and confirmations all happen in the
+  customer's local time — a Perth lead sees "Perth time", not a hardcoded
+  "Melbourne time". Invalid/hallucinated values are dropped to null and never
+  persisted; the change is recorded as a `lead_timezone_updated` event.
+  - Files: `src/lib/ai/service.ts`, `src/lib/ai/adapters/{anthropic,openai}.ts`,
+    `src/lib/leads/service.ts`, `src/lib/utils/timezones.ts`,
+    `src/lib/types/domain.ts`,
+    `netlify/functions/{process-ai-reply,process-booking}-background.ts`.
+
+### Changed
+
+- **Booking conversation events moved onto the `ConversationEventType` enum.**
+  Booking/slots/timezone events that were raw string literals now reference the
+  enum. String values are unchanged, so historical rows and the prior-booking
+  cancellation query (which filters by `booking_reference`) still match.
+  (`src/lib/types/enums.ts`,
+  `netlify/functions/{process-ai-reply,process-booking}-background.ts`)
+
 ## [2026-06-10]
 
 ### Fixed

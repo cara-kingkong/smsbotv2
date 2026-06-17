@@ -1,5 +1,34 @@
 import type { CalendarAdapter, BookingInput, BookingResult } from '@lib/types';
 
+/**
+ * Turn a Calendly error body into a concise, front-loaded summary so the
+ * cause survives truncation in logs and the diagnostics panel. Calendly 4xx
+ * bodies look like:
+ *   { "title": "Invalid Argument", "message": "...",
+ *     "details": [{ "parameter": "start_time", "message": "..." }] }
+ * Falls back to the raw (trimmed) body when it isn't the expected shape.
+ */
+function summarizeError(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as {
+      title?: string;
+      message?: string;
+      details?: Array<{ parameter?: string; message?: string }>;
+    };
+    const parts: string[] = [];
+    if (parsed.title) parts.push(parsed.title);
+    if (parsed.message && parsed.message !== parsed.title) parts.push(parsed.message);
+    const details = (parsed.details ?? [])
+      .map((d) => [d.parameter, d.message].filter(Boolean).join(': '))
+      .filter(Boolean);
+    if (details.length > 0) parts.push(`[${details.join('; ')}]`);
+    const summary = parts.join(' — ');
+    return summary || body.slice(0, 500);
+  } catch {
+    return body.slice(0, 500);
+  }
+}
+
 export class CalendlyAdapter implements CalendarAdapter {
   private baseUrl = 'https://api.calendly.com';
 
@@ -17,7 +46,7 @@ export class CalendlyAdapter implements CalendarAdapter {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(`Calendly API error ${response.status}: ${body}`);
+      throw new Error(`Calendly API error ${response.status}: ${summarizeError(body)}`);
     }
 
     return response.json() as Promise<Record<string, unknown>>;

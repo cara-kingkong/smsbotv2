@@ -15,6 +15,8 @@ import {
 import { CRMService } from '../../src/lib/crm/service';
 import { buildConversationNote } from '../../src/lib/crm/notes';
 import { AuditService } from '../../src/lib/audit/service';
+import { matchAvailableSlot, AVAILABILITY_WINDOW_DAYS } from '../../src/lib/utils/booking-guard';
+import { friendlyTimezoneLabel } from '../../src/lib/utils/timezones';
 import { runQueueJob } from '../../src/lib/queues/job-runner';
 
 interface ProcessBookingPayload {
@@ -103,6 +105,98 @@ export default async (req: Request, _context: Context) =>
 
     const executionService = new BookingService(db, new CalendlyAdapter(apiKey));
 
+    // ── Availability pre-check (backstop) ────────────────────────
+    // Never POST a start_time that isn't a real, currently-available Calendly
+    // slot. A missing time (older paths defaulted to "now") or a stale /
+    // self-proposed time is rejected with a 400 — which previously burned every
+    // retry and dead-lettered. Validate against live availability first and,
+    // on a mismatch, hand to a human with a clear reason instead of hammering
+    // Calendly. On a hit we snap to the slot's canonical ISO so the POST matches
+    // exactly.
+    //
+    // Best-effort caveat: if the availability GET throws or returns empty while
+    // a confirmed_time IS present, we fall through and POST the unvalidated time
+    // — i.e. the backstop is bypassed exactly when Calendly is flaky. That's
+    // acceptable because process-ai-reply already validated this time against
+    // live availability before enqueuing; this check is a secondary guard for
+    // staleness and for any other enqueue path. We still refuse to book with no
+    // confirmed time at all.
+    {
+      const precheckEventTypeUri = validation.calendar.external_calendar_id ?? validation.calendar.booking_url;
+      let availableSlots: string[] = [];
+      if (precheckEventTypeUri) {
+        try {
+          const start = new Date(Date.now() + 5 * 60 * 1000);
+          const end = new Date(start.getTime() + AVAILABILITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+          const res = await new CalendlyAdapter(apiKey).listAvailableSlots(precheckEventTypeUri, {
+            start: start.toISOString(),
+            end: end.toISOString(),
+          });
+          availableSlots = res.slots;
+        } catch (err) {
+          console.warn('[Booking] Availability pre-check failed; proceeding to booking attempt:', err);
+        }
+      }
+
+      if (availableSlots.length > 0) {
+        const matched = matchAvailableSlot(payload.confirmed_time, availableSlots);
+        if (!matched) {
+          await db.from('conversation_events').insert({
+            conversation_id,
+            event_type: ConversationEventType.BookingFailed,
+            event_payload_json: {
+              error: payload.confirmed_time
+                ? `Requested time ${payload.confirmed_time} is not an available slot`
+                : 'No confirmed time supplied',
+              stage: 'availability_precheck',
+              requested_time: payload.confirmed_time ?? null,
+              available_slot_count: availableSlots.length,
+            },
+          });
+          await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
+          await queueService.enqueue({
+            workspace_id: conversation.workspace_id,
+            job_type: 'notify_escalation',
+            queue_name: 'default',
+            payload: {
+              conversation_id,
+              reason: 'requested_time_unavailable',
+              should_book: true,
+              qualification_state: null,
+            },
+          });
+          return new Response('Requested time unavailable — needs human', { status: 200 });
+        }
+        // Snap to the slot's exact ISO so the Calendly POST matches.
+        payload.confirmed_time = matched;
+      } else if (!payload.confirmed_time) {
+        // No availability fetched AND no time to book — never default to "now".
+        await db.from('conversation_events').insert({
+          conversation_id,
+          event_type: ConversationEventType.BookingFailed,
+          event_payload_json: {
+            error: 'No confirmed time supplied and no availability to verify against',
+            stage: 'availability_precheck',
+          },
+        });
+        await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
+        // Parity with the "requested time unavailable" branch above: actively
+        // ping the team, don't just surface in the Needs Human inbox.
+        await queueService.enqueue({
+          workspace_id: conversation.workspace_id,
+          job_type: 'notify_escalation',
+          queue_name: 'default',
+          payload: {
+            conversation_id,
+            reason: 'no_available_slots',
+            should_book: true,
+            qualification_state: null,
+          },
+        });
+        return new Response('No confirmed time — needs human', { status: 200 });
+      }
+    }
+
     console.log('[Booking] Starting booking for conversation:', conversation_id, {
       calendar_id: validation.calendar.id,
       calendar_name: validation.calendar.name,
@@ -116,7 +210,7 @@ export default async (req: Request, _context: Context) =>
       .from('conversation_events')
       .select('event_payload_json')
       .eq('conversation_id', conversation_id)
-      .eq('event_type', 'booking_reference')
+      .eq('event_type', ConversationEventType.BookingReference)
       .order('created_at', { ascending: false });
 
     if (priorBookings && priorBookings.length > 0) {
@@ -129,7 +223,7 @@ export default async (req: Request, _context: Context) =>
           if (cancelResult.success) {
             await db.from('conversation_events').insert({
               conversation_id,
-              event_type: 'booking_cancelled',
+              event_type: ConversationEventType.BookingCancelled,
               event_payload_json: { event_uri: eventUri, reason: 'rebooked' },
             });
           }
@@ -185,7 +279,7 @@ export default async (req: Request, _context: Context) =>
     // Store the full booking result for manual reference
     await db.from('conversation_events').insert({
       conversation_id,
-      event_type: 'booking_reference',
+      event_type: ConversationEventType.BookingReference,
       event_payload_json: {
         booking_id: bookingResult.booking_id,
         event_uri: bookingResult.event_uri ?? null,
@@ -219,15 +313,19 @@ export default async (req: Request, _context: Context) =>
         confirmationBody += ` Confirmation email heading to ${lead.email} now.`;
       }
       if (payload.confirmed_time) {
+        // Render the confirmation in the LEAD's timezone (set from onboarding or
+        // detected mid-conversation), not a hardcoded one — so a Perth lead sees
+        // their Perth time labelled "Perth time", not "Melbourne time".
+        const confirmTz = lead.timezone ?? 'Australia/Melbourne';
         const d = new Date(payload.confirmed_time);
         const formatted = d.toLocaleString('en-AU', {
-          timeZone: 'Australia/Melbourne',
+          timeZone: confirmTz,
           weekday: 'long',
           hour: 'numeric',
           minute: '2-digit',
           hour12: true,
         }).replace(':00', '').toLowerCase();
-        confirmationBody = `You're all set for ${formatted} (Melbourne time)!${withWho} Confirmation email heading to ${lead.email ?? 'your inbox'} now.`;
+        confirmationBody = `You're all set for ${formatted} (${friendlyTimezoneLabel(confirmTz)})!${withWho} Confirmation email heading to ${lead.email ?? 'your inbox'} now.`;
       }
 
       const confirmationMessage = await messagingService.queueOutbound({
@@ -250,7 +348,7 @@ export default async (req: Request, _context: Context) =>
 
       await db.from('conversation_events').insert({
         conversation_id,
-        event_type: 'booking_closeout_queued',
+        event_type: ConversationEventType.BookingCloseoutQueued,
         event_payload_json: {
           message_id: confirmationMessage.id,
           event_uri: bookingResult.event_uri ?? null,
@@ -262,7 +360,7 @@ export default async (req: Request, _context: Context) =>
       console.error('Failed to queue booking closeout SMS:', err);
       await db.from('conversation_events').insert({
         conversation_id,
-        event_type: 'booking_closeout_failed',
+        event_type: ConversationEventType.BookingCloseoutFailed,
         event_payload_json: { error: err instanceof Error ? err.message : 'Unknown error' },
       });
     }

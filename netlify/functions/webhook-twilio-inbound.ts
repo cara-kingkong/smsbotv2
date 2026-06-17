@@ -4,7 +4,7 @@ import { TwilioAdapter } from '../../src/lib/messaging/adapters/twilio';
 import { MessagingService } from '../../src/lib/messaging/service';
 import { PhoneNumberService } from '../../src/lib/messaging/phone-numbers';
 import { QueueService } from '../../src/lib/queues/service';
-import { ConversationStatus, ConversationOutcome } from '../../src/lib/types';
+import { ConversationStatus, ConversationOutcome, ConversationEventType } from '../../src/lib/types';
 import { ConversationService } from '../../src/lib/conversations/service';
 import { recordOptOut } from '../../src/lib/conversations/opt-out';
 import { isOptOut } from '../../src/lib/utils/opt-out';
@@ -260,7 +260,9 @@ export default async (req: Request, _context: Context) => {
       const reopenQueue = new QueueService(db);
       await db.from('conversation_events').insert({
         conversation_id: conversation.id,
-        event_type: reopenWasBooked ? 'message_after_booking' : 'reopened_closed_conversation',
+        event_type: reopenWasBooked
+          ? ConversationEventType.MessageAfterBooking
+          : ConversationEventType.ReopenedClosedConversation,
         event_payload_json: {
           previous_status: reopenPreviousStatus,
           previous_outcome: reopenPreviousOutcome,

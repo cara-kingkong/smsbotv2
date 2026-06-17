@@ -91,6 +91,22 @@ export class LeadService {
     return data;
   }
 
+  /**
+   * Update a lead's timezone — used when the AI detects the lead's location in
+   * conversation. Validates it's a real IANA zone before persisting (it drives
+   * all business-hours, slot-offering, and booking logic for this lead).
+   */
+  async updateTimezone(leadId: string, timezone: string): Promise<void> {
+    if (!isValidTimezone(timezone)) {
+      throw new Error(`Invalid timezone: ${timezone}`);
+    }
+    const { error } = await this.db
+      .from('leads')
+      .update({ timezone })
+      .eq('id', leadId);
+    if (error) throw new Error(`Failed to update lead timezone: ${error.message}`);
+  }
+
   async getById(id: string): Promise<Lead | null> {
     const { data, error } = await this.db
       .from('leads')

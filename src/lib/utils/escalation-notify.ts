@@ -50,6 +50,8 @@ const REASON_LABELS: Record<string, string> = {
   ambiguous_calendar_selection: 'Ambiguous calendar selection',
   message_after_booking: 'Lead replied after their call was booked',
   reopened_closed_conversation: 'New message on a previously closed conversation',
+  requested_time_unavailable: 'Lead’s requested time is unavailable and no slots could be offered',
+  no_available_slots: 'Lead agreed to book but the calendar has no available slots',
 };
 
 /**

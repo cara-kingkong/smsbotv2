@@ -30,7 +30,8 @@ import { CalendlyAdapter } from '../../src/lib/calendar/adapters/calendly';
 import { isWithinBusinessHours, getNextBusinessHoursStart, filterSlotsWithinBusinessHours } from '../../src/lib/utils/business-hours';
 import { evaluateStopConditions } from '../../src/lib/utils/stop-conditions';
 import { countConsecutiveFollowups } from '../../src/lib/utils/followups';
-import { detectBookingAcceptance } from '../../src/lib/utils/booking-guard';
+import { detectBookingAcceptance, matchAvailableSlot, AVAILABILITY_WINDOW_DAYS } from '../../src/lib/utils/booking-guard';
+import { isValidTimezone, friendlyTimezoneLabel } from '../../src/lib/utils/timezones';
 import { detectReaction } from '../../src/lib/utils/reaction';
 import { runQueueJob } from '../../src/lib/queues/job-runner';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
@@ -312,6 +313,7 @@ export default async (req: Request, _context: Context) =>
         recommended_calendar_id: null,
         escalate_to_human: false,
         request_removal: false,
+        detected_timezone: null,
         tags_to_emit: [],
         confidence_notes: ['Opening message'],
         reason_summary: 'Initial outbound opener',
@@ -358,6 +360,34 @@ export default async (req: Request, _context: Context) =>
         confirmed_time: decision.confirmed_time,
       },
     });
+
+    // ── Persist a timezone the lead revealed ─────────────────────
+    // When the lead tells us where they are ("I'm in Brisbane", "11:30am AWST"),
+    // the model resolves it to an IANA zone. Save it to the lead so every future
+    // turn — slot offers, business-hours filtering, the Calendly invitee tz, and
+    // the confirmation SMS — happens in the customer's local time. Apply it to
+    // the in-memory lead too so it takes effect on THIS turn's offer/booking.
+    if (
+      decision.detected_timezone &&
+      isValidTimezone(decision.detected_timezone) &&
+      decision.detected_timezone !== lead.timezone
+    ) {
+      try {
+        await leadService.updateTimezone(lead.id, decision.detected_timezone);
+        await db.from('conversation_events').insert({
+          conversation_id,
+          event_type: ConversationEventType.LeadTimezoneUpdated,
+          event_payload_json: {
+            from: lead.timezone ?? null,
+            to: decision.detected_timezone,
+            source: 'ai_detected',
+          },
+        });
+        lead.timezone = decision.detected_timezone;
+      } catch (err) {
+        console.warn(`Failed to update lead timezone to ${decision.detected_timezone}:`, err);
+      }
+    }
 
     // ── Honour an AI-detected removal request (opt-out safety net) ──
     // The deterministic keyword check at the Twilio webhook catches "STOP",
@@ -443,7 +473,7 @@ export default async (req: Request, _context: Context) =>
       bookingBlockedForQualification = true;
       await db.from('conversation_events').insert({
         conversation_id,
-        event_type: 'booking_blocked_unqualified',
+        event_type: ConversationEventType.BookingBlockedUnqualified,
         event_payload_json: {
           qualification_state: decision.qualification_state,
           attempted_should_offer_times: decision.should_offer_times,
@@ -495,7 +525,7 @@ export default async (req: Request, _context: Context) =>
     ) {
       await db.from('conversation_events').insert({
         conversation_id,
-        event_type: 'booking_re_attempt_blocked',
+        event_type: ConversationEventType.BookingReAttemptBlocked,
         event_payload_json: {
           qualification_state: decision.qualification_state,
           attempted_should_offer_times: decision.should_offer_times,
@@ -515,69 +545,89 @@ export default async (req: Request, _context: Context) =>
       return new Response('Already booked — re-book attempt blocked, routed to human', { status: 200 });
     }
 
-    // ── Phase 1: Offer available time slots ──────────────────────
-    if (decision.should_offer_times && !decision.should_book && calendars.length > 0) {
-      const slotsCalendar = calendars[0];
-      const isReOffer = !!priorSlotsEvent;
-      const rawSlots = await fetchAllCalendlySlots(db, slotsCalendar);
+    // Fetch real Calendly availability, pick + format an offer, send it, log
+    // SlotsOffered, and park the conversation WaitingForLead. Returns true when
+    // an offer went out, false when there were no slots to offer (caller decides
+    // the fallback). Shared by Phase 1 and the booking-validation diversions
+    // below so a lead is never asked to pick from times we didn't actually
+    // fetch — and we never blind-book a time Calendly never offered.
+    const offerSlots = async (opts: {
+      calendar: Calendar;
+      isReOffer: boolean;
+      relaxHours: boolean;
+      leadReply?: string | null;
+      reason: string;
+    }): Promise<boolean> => {
+      const rawSlots = await fetchAllCalendlySlots(db, opts.calendar);
       // Guardrail: by default only offer slots within business hours (in the
       // lead's timezone) so we never suggest 4am/midnight call times. When the
-      // lead has explicitly asked for an out-of-hours time, the AI sets
-      // offer_outside_business_hours and we open up the full availability and
-      // spread the offer across the day so early/late options surface.
-      const relaxHours = decision.offer_outside_business_hours === true;
-      const allSlots = relaxHours
+      // lead has explicitly asked for an out-of-hours time the caller passes
+      // relaxHours and we open up the full availability, spread across the day.
+      const allSlots = opts.relaxHours
         ? rawSlots
         : filterSlotsWithinBusinessHours(rawSlots, effectiveBusinessHours, lead.timezone);
-      const offeredSlots = relaxHours
+      const offeredSlots = opts.relaxHours
         ? spreadAcrossPool(allSlots, 3)
-        : isReOffer
+        : opts.isReOffer
           ? spreadSlots(allSlots, 3)
           : pickInitialSlots(allSlots, lead.timezone);
 
-      if (offeredSlots.length > 0) {
-        const formatted = (relaxHours || isReOffer)
-          ? formatSlotsFallback(offeredSlots, lead.timezone)
-          : formatSlotsInitial(offeredSlots, lead.timezone);
-        const combinedReply = decision.reply_text
-          ? `${decision.reply_text}\n\n${formatted}`
-          : formatted;
+      if (offeredSlots.length === 0) return false;
 
-        await heartbeat();
-        const message = await messagingService.sendOutbound({
-          conversation_id,
-          to: lead.phone_e164,
-          from: fromNumber,
-          body_text: combinedReply,
-          sender_type: SenderType.AI,
-          source_job_id: jobId,
-        });
+      const formatted = (opts.relaxHours || opts.isReOffer)
+        ? formatSlotsFallback(offeredSlots, lead.timezone)
+        : formatSlotsInitial(offeredSlots, lead.timezone);
+      const combinedReply = opts.leadReply
+        ? `${opts.leadReply}\n\n${formatted}`
+        : formatted;
 
-        await applyFirstMessageSentTag(db, queueService, conversation_id);
+      await heartbeat();
+      const message = await messagingService.sendOutbound({
+        conversation_id,
+        to: lead.phone_e164,
+        from: fromNumber,
+        body_text: combinedReply,
+        sender_type: SenderType.AI,
+        source_job_id: jobId,
+      });
 
-        await db.from('ai_decisions')
-          .update({ message_id: message.id })
-          .eq('conversation_id', conversation_id)
-          .is('message_id', null)
-          .order('created_at', { ascending: false })
-          .limit(1);
+      await applyFirstMessageSentTag(db, queueService, conversation_id);
 
-        await db.from('conversation_events').insert({
-          conversation_id,
-          event_type: ConversationEventType.SlotsOffered,
-          event_payload_json: {
-            calendar_id: slotsCalendar.id,
-            calendar_name: slotsCalendar.name,
-            slots: offeredSlots,
-            slot_count: offeredSlots.length,
-          },
-        });
+      await db.from('ai_decisions')
+        .update({ message_id: message.id })
+        .eq('conversation_id', conversation_id)
+        .is('message_id', null)
+        .order('created_at', { ascending: false })
+        .limit(1);
 
-        await conversationService.updateStatus(conversation_id, ConversationStatus.WaitingForLead);
-        return new Response('Slots offered', { status: 200 });
-      }
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: ConversationEventType.SlotsOffered,
+        event_payload_json: {
+          calendar_id: opts.calendar.id,
+          calendar_name: opts.calendar.name,
+          slots: offeredSlots,
+          slot_count: offeredSlots.length,
+          reason: opts.reason,
+        },
+      });
+
+      await conversationService.updateStatus(conversation_id, ConversationStatus.WaitingForLead);
+      return true;
+    };
+
+    // ── Phase 1: Offer available time slots ──────────────────────
+    if (decision.should_offer_times && !decision.should_book && calendars.length > 0) {
+      const offered = await offerSlots({
+        calendar: calendars[0],
+        isReOffer: !!priorSlotsEvent,
+        relaxHours: decision.offer_outside_business_hours === true,
+        leadReply: decision.reply_text,
+        reason: 'ai_offer',
+      });
+      if (offered) return new Response('Slots offered', { status: 200 });
       // If no slots available, fall through to let the AI reply go out normally
-      console.warn(`No available slots found for calendar ${slotsCalendar.id} — falling through`);
+      console.warn(`No available slots found for calendar ${calendars[0].id} — falling through`);
     }
 
     // ── Cancel existing booking if requested ───────────────────
@@ -586,7 +636,7 @@ export default async (req: Request, _context: Context) =>
         .from('conversation_events')
         .select('event_payload_json')
         .eq('conversation_id', conversation_id)
-        .eq('event_type', 'booking_reference')
+        .eq('event_type', ConversationEventType.BookingReference)
         .order('created_at', { ascending: false });
 
       let cancelled = false;
@@ -614,7 +664,7 @@ export default async (req: Request, _context: Context) =>
                   cancelled = true;
                   await db.from('conversation_events').insert({
                     conversation_id,
-                    event_type: 'booking_cancelled',
+                    event_type: ConversationEventType.BookingCancelled,
                     event_payload_json: { event_uri: eventUri, reason: 'lead_requested' },
                   });
                 }
@@ -641,7 +691,7 @@ export default async (req: Request, _context: Context) =>
       } else {
         await db.from('conversation_events').insert({
           conversation_id,
-          event_type: 'booking_needs_human',
+          event_type: ConversationEventType.BookingNeedsHuman,
           event_payload_json: {
             reason: 'ai_escalation',
             should_book: decision.should_book,
@@ -756,13 +806,77 @@ export default async (req: Request, _context: Context) =>
     }
 
     if (decision.should_book && decision.recommended_calendar_id) {
+      // Validate the confirmed time against REAL Calendly availability before
+      // booking. The lead may have proposed their own time, or the model may
+      // have constructed a timestamp from free text ("tomorrow 11:30am AWST") —
+      // neither is guaranteed to be a bookable slot, and Calendly rejects a
+      // non-slot start_time with a 400 (burning retries and dead-lettering). So
+      // only book a time that exactly matches an available slot; otherwise offer
+      // real slots and let the lead pick a valid one.
+      const bookingCalendar = calendars.find((c) => c.id === decision.recommended_calendar_id) ?? calendars[0];
+      const availableSlots = await fetchAllCalendlySlots(db, bookingCalendar);
+      const matchedSlot = matchAvailableSlot(decision.confirmed_time, availableSlots);
+
+      if (!matchedSlot) {
+        await db.from('conversation_events').insert({
+          conversation_id,
+          event_type: ConversationEventType.BookingTimeUnavailable,
+          event_payload_json: {
+            recommended_calendar_id: bookingCalendar.id,
+            requested_time: decision.confirmed_time ?? null,
+            available_slot_count: availableSlots.length,
+          },
+        });
+
+        // Offer real slots so the lead can pick a bookable time. Bundle the
+        // reply only if it wasn't already sent this turn (here it wasn't — the
+        // should_book path defers the reply via bookingWillQueue — but guard
+        // anyway so we never double-text).
+        if (availableSlots.length > 0) {
+          const offered = await offerSlots({
+            calendar: bookingCalendar,
+            isReOffer: !!priorSlotsEvent,
+            relaxHours: decision.offer_outside_business_hours === true,
+            leadReply: tookAction ? null : decision.reply_text,
+            reason: 'requested_time_unavailable',
+          });
+          if (offered) return new Response('Requested time unavailable — offered slots', { status: 200 });
+        }
+
+        // No slots to offer — hand to a human rather than book a bad time.
+        await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
+        await enqueueEscalationNotification(queueService, {
+          workspaceId: conversation.workspace_id,
+          conversationId: conversation_id,
+          reason: 'requested_time_unavailable',
+          shouldBook: true,
+          qualificationState: decision.qualification_state,
+        });
+        if (!tookAction) {
+          try {
+            await queueSystemMessage(queueService, db, {
+              workspaceId: conversation.workspace_id,
+              conversationId: conversation_id,
+              to: lead.phone_e164,
+              bodyText: BOOKING_HANDOFF_MESSAGE,
+              sourceJobId: undefined,
+            });
+          } catch (err) {
+            console.error('Failed to queue booking-time-unavailable SMS:', err);
+          }
+        }
+        return new Response('Requested time unavailable — needs human', { status: 200 });
+      }
+
+      // matchedSlot is a real, bookable slot ISO — book exactly that.
       await db.from('conversation_events').insert({
         conversation_id,
-        event_type: 'booking_queued',
+        event_type: ConversationEventType.BookingQueued,
         event_payload_json: {
           source: 'ai_decision',
-          recommended_calendar_id: decision.recommended_calendar_id,
-          confirmed_time: decision.confirmed_time,
+          recommended_calendar_id: bookingCalendar.id,
+          confirmed_time: matchedSlot,
+          requested_time: decision.confirmed_time,
           qualification_state: decision.qualification_state,
         },
       });
@@ -772,8 +886,8 @@ export default async (req: Request, _context: Context) =>
         queue_name: 'booking',
         payload: {
           conversation_id,
-          recommended_calendar_id: decision.recommended_calendar_id,
-          confirmed_time: decision.confirmed_time,
+          recommended_calendar_id: bookingCalendar.id,
+          confirmed_time: matchedSlot,
           lead_id: lead.id,
           agent_id: conversation.agent_id,
           campaign_id: conversation.campaign_id,
@@ -786,7 +900,7 @@ export default async (req: Request, _context: Context) =>
       const bookingNeedsHumanReason = calendars.length === 0 ? 'no_assigned_calendar' : 'ambiguous_calendar_selection';
       await db.from('conversation_events').insert({
         conversation_id,
-        event_type: 'booking_needs_human',
+        event_type: ConversationEventType.BookingNeedsHuman,
         event_payload_json: {
           reason: bookingNeedsHumanReason,
           should_book: true,
@@ -826,46 +940,75 @@ export default async (req: Request, _context: Context) =>
       bookingAcceptance.acceptanceDetected &&
       calendars.length > 0
     ) {
-      const fallbackCalendarId = calendars[0].id;
+      const fallbackCalendar = calendars[0];
       await db.from('conversation_events').insert({
         conversation_id,
-        event_type: 'booking_acceptance_detected',
+        event_type: ConversationEventType.BookingAcceptanceDetected,
         event_payload_json: {
           source: 'deterministic_fallback',
           evidence: bookingAcceptance.evidence,
-          fallback_calendar_id: fallbackCalendarId,
+          fallback_calendar_id: fallbackCalendar.id,
           qualification_state: decision.qualification_state,
         },
       });
+
+      // The lead signalled acceptance but the model didn't pick a validated
+      // time to book. Do NOT enqueue a booking with no confirmed_time — that
+      // used to default to booking "now", which Calendly rejects with a 400.
+      // OFFER real available slots instead and let the lead choose one.
+      const offered = await offerSlots({
+        calendar: fallbackCalendar,
+        isReOffer: !!priorSlotsEvent,
+        relaxHours: decision.offer_outside_business_hours === true,
+        // The standalone reply_text was already sent above (acceptance path has
+        // should_book false, so bookingWillQueue was false and the reply went
+        // out). Don't re-prepend it here or the lead gets it twice — often as a
+        // "booking you in now" line immediately contradicted by a slot menu.
+        leadReply: tookAction ? null : decision.reply_text,
+        reason: 'acceptance_fallback',
+      });
+      if (offered) {
+        return new Response('Acceptance detected — offered slots', { status: 200 });
+      }
+
+      // No slots to offer — hand to a human rather than book a bad time.
       await db.from('conversation_events').insert({
         conversation_id,
-        event_type: 'booking_queued',
+        event_type: ConversationEventType.BookingNeedsHuman,
         event_payload_json: {
-          source: 'deterministic_fallback',
-          recommended_calendar_id: fallbackCalendarId,
+          reason: 'no_available_slots',
           evidence: bookingAcceptance.evidence,
+          fallback_calendar_id: fallbackCalendar.id,
         },
       });
-      await queueService.enqueue({
-        workspace_id: conversation.workspace_id,
-        job_type: 'process_booking',
-        queue_name: 'booking',
-        payload: {
-          conversation_id,
-          recommended_calendar_id: fallbackCalendarId,
-          lead_id: lead.id,
-          agent_id: conversation.agent_id,
-          campaign_id: conversation.campaign_id,
-        },
+      await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
+      await enqueueEscalationNotification(queueService, {
+        workspaceId: conversation.workspace_id,
+        conversationId: conversation_id,
+        reason: 'no_available_slots',
+        shouldBook: true,
+        qualificationState: decision.qualification_state,
       });
-      bookingQueued = true;
-      tookAction = true;
+      if (!tookAction) {
+        try {
+          await queueSystemMessage(queueService, db, {
+            workspaceId: conversation.workspace_id,
+            conversationId: conversation_id,
+            to: lead.phone_e164,
+            bodyText: BOOKING_HANDOFF_MESSAGE,
+            sourceJobId: undefined,
+          });
+        } catch (err) {
+          console.error('Failed to queue acceptance-no-slots SMS:', err);
+        }
+      }
+      return new Response('Acceptance detected but no slots — needs human', { status: 200 });
     } else if (!bookingBlockedForQualification && bookingAcceptance.acceptanceDetected) {
       // No calendars at all — escalate, but only send a system message
       // if the AI didn't already reply (avoid double messages).
       await db.from('conversation_events').insert({
         conversation_id,
-        event_type: 'booking_needs_human',
+        event_type: ConversationEventType.BookingNeedsHuman,
         event_payload_json: {
           reason: 'no_assigned_calendar',
           evidence: bookingAcceptance.evidence,
@@ -1085,13 +1228,13 @@ async function hasActiveBooking(
     db.from('conversation_events')
       .select('created_at')
       .eq('conversation_id', conversationId)
-      .eq('event_type', 'booking_reference')
+      .eq('event_type', ConversationEventType.BookingReference)
       .order('created_at', { ascending: false })
       .limit(1),
     db.from('conversation_events')
       .select('created_at')
       .eq('conversation_id', conversationId)
-      .eq('event_type', 'booking_cancelled')
+      .eq('event_type', ConversationEventType.BookingCancelled)
       .order('created_at', { ascending: false })
       .limit(1),
   ]);
@@ -1151,16 +1294,7 @@ async function queueSystemMessage(
       payload: Record<string, unknown>;
     }) => Promise<unknown>;
   },
-  db: {
-    from: (table: string) => {
-      select: () => unknown;
-      insert: (data: Record<string, unknown>) => {
-        select: () => { single: () => Promise<{ data: { id: string } | null; error: { message: string } | null }> };
-      };
-      update?: () => unknown;
-      eq?: () => unknown;
-    };
-  },
+  db: import('@supabase/supabase-js').SupabaseClient,
   input: {
     workspaceId: string;
     conversationId: string;
@@ -1191,7 +1325,7 @@ async function queueSystemMessage(
   });
 }
 
-/** Fetch all available Calendly slots for the next 7 days (raw, unpicked) */
+/** Fetch all available Calendly slots within the availability window (raw, unpicked) */
 async function fetchAllCalendlySlots(
   db: { from: (table: string) => ReturnType<import('@supabase/supabase-js').SupabaseClient['from']> },
   calendar: Calendar,
@@ -1217,7 +1351,7 @@ async function fetchAllCalendlySlots(
   try {
     const adapter = new CalendlyAdapter(apiKey);
     const start = new Date(Date.now() + 5 * 60 * 1000); // 5 min buffer so Calendly accepts it
-    const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const end = new Date(start.getTime() + AVAILABILITY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
     const result = await adapter.listAvailableSlots(eventTypeUri, {
       start: start.toISOString(),
       end: end.toISOString(),
@@ -1339,10 +1473,12 @@ function isTomorrow(iso: string, tz: string): boolean {
 
 /**
  * Initial format: "I've got 10am or 2pm tomorrow, or 11am Wednesday if that
- * suits better (Melbourne time) - which works?"
+ * suits better (Brisbane time) - which works?" — times AND the tz label both
+ * render in the lead's own timezone.
  */
 function formatSlotsInitial(slots: string[], leadTimezone?: string | null): string {
   const tz = leadTimezone ?? 'Australia/Melbourne';
+  const tzLabel = friendlyTimezoneLabel(leadTimezone);
   if (slots.length === 0) return '';
 
   // Group by day
@@ -1367,24 +1503,25 @@ function formatSlotsInitial(slots: string[], leadTimezone?: string | null): stri
   }
 
   if (parts.length === 1) {
-    return `I've got ${parts[0]} available (Melbourne time) - does that work?`;
+    return `I've got ${parts[0]} available (${tzLabel}) - does that work?`;
   }
 
   const last = parts.pop();
-  return `I've got ${parts.join(', ')}, or ${last} if that suits better (Melbourne time) - which works?`;
+  return `I've got ${parts.join(', ')}, or ${last} if that suits better (${tzLabel}) - which works?`;
 }
 
 /** Fallback format for re-offers (wider range, used after lead rejects initial times) */
 function formatSlotsFallback(slots: string[], leadTimezone?: string | null): string {
   const tz = leadTimezone ?? 'Australia/Melbourne';
+  const tzLabel = friendlyTimezoneLabel(leadTimezone);
 
   const formatSlot = (iso: string) => `${formatTime(iso, tz)} ${formatDayName(iso, tz)}`;
 
   if (slots.length === 1) {
-    return `I've got ${formatSlot(slots[0])} available (Melbourne time) - does that work?`;
+    return `I've got ${formatSlot(slots[0])} available (${tzLabel}) - does that work?`;
   }
 
   const formatted = slots.map(formatSlot);
   const last = formatted.pop();
-  return `I've got ${formatted.join(', ')}, or ${last} available (Melbourne time) - which suits?`;
+  return `I've got ${formatted.join(', ')}, or ${last} available (${tzLabel}) - which suits?`;
 }

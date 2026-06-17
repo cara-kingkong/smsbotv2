@@ -350,6 +350,11 @@ export interface AIDecision {
    *  system records the opt-out (OptedOut outcome, leads.opted_out, CRM
    *  unsubscribe event) — the AI safety net for compliance. */
   request_removal: boolean;
+  /** An IANA timezone the lead revealed in conversation (e.g. said "I'm in
+   *  Brisbane" or "11:30am AWST"). The system persists it to the lead so all
+   *  future slot offers, business-hours filtering, booking, and confirmations
+   *  happen in the customer's local time. null when nothing was revealed. */
+  detected_timezone: string | null;
   tags_to_emit: string[];
   confidence_notes: string[];
   reason_summary: string;

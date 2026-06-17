@@ -49,6 +49,7 @@ You must respond with valid JSON matching this schema:
   "recommended_calendar_id": string | null,
   "escalate_to_human": boolean,
   "request_removal": boolean,
+  "detected_timezone": string | null,
   "tags_to_emit": string[],
   "confidence_notes": string[],
   "reason_summary": string
@@ -110,6 +111,13 @@ request_removal: Set true when the lead asks to be removed, unsubscribed, taken 
   to the CRM, so they are never messaged again. Your reply_text should briefly and warmly
   acknowledge it (e.g. "No worries, I'll take you off our list. Take care."). Do NOT set
   this for a soft "not right now" / "maybe later" — only for a genuine removal request.
+
+detected_timezone: When the lead reveals where they are or what timezone they're in
+  — e.g. "I'm in Brisbane", "I'm based in Perth", "can we do 11:30am AWST", "9am Sydney
+  time" — set this to the matching IANA timezone string ("Australia/Brisbane",
+  "Australia/Perth", "Australia/Sydney", "America/New_York", etc.). The system saves it
+  so all future times are offered, booked, and confirmed in their local time. Leave it
+  null when the lead hasn't indicated a location/timezone. Do NOT guess from area code.
 
 tags_to_emit: Labels for this lead (e.g. "agency", "ecommerce", "course"). The lead never sees these.
 confidence_notes: Internal reasoning notes. The lead never sees these.
@@ -200,6 +208,7 @@ export class OpenAIAdapter implements AIProviderAdapter {
         recommended_calendar_id: null,
         escalate_to_human: true,
         request_removal: false,
+        detected_timezone: null,
         tags_to_emit: [],
         confidence_notes: ['Failed to parse structured output'],
         reason_summary: 'Structured output parse failure — escalating',

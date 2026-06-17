@@ -36,3 +36,16 @@ export function isValidTimezone(tz: unknown): tz is string {
     return false;
   }
 }
+
+/**
+ * A short, lead-facing label for an IANA timezone — the city portion plus
+ * " time" (e.g. "Australia/Brisbane" → "Brisbane time", "America/New_York" →
+ * "New York time"). Used in SMS copy so offered/confirmed times are labelled in
+ * the customer's actual zone instead of a hardcoded one. Falls back to
+ * "Melbourne time" when the zone is missing/empty (the system's default tz).
+ */
+export function friendlyTimezoneLabel(tz?: string | null): string {
+  if (!tz) return 'Melbourne time';
+  const city = tz.split('/').pop()?.replace(/_/g, ' ').trim();
+  return city ? `${city} time` : 'Melbourne time';
+}

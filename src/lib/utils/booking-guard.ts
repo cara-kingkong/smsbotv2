@@ -16,6 +16,42 @@ interface BookingSignal {
   evidence: string[];
 }
 
+/**
+ * How far ahead we fetch Calendly availability — for BOTH offering slots and
+ * validating a confirmed/proposed time. The two must use the same horizon: a
+ * lead can only be matched against, or offered, times we actually fetched. This
+ * is the ceiling — a self-proposed time beyond it ("how about in 3 weeks?")
+ * won't match and the lead gets offered nearer slots instead. Widen here if you
+ * need to honour further-out requests.
+ */
+export const AVAILABILITY_WINDOW_DAYS = 14;
+
+/**
+ * Find the available slot that matches a requested time. Calendly requires the
+ * booking `start_time` to EXACTLY match a real available slot — a self-proposed
+ * or model-constructed timestamp gets rejected with a 400 — so we compare to
+ * the minute and, on a hit, return the slot's own canonical ISO to send back to
+ * Calendly. Returns null when the requested time is missing, unparseable, or
+ * not currently available (the caller should then offer real slots instead).
+ */
+export function matchAvailableSlot(
+  requestedTime: string | null | undefined,
+  slots: string[],
+): string | null {
+  if (!requestedTime) return null;
+  const target = new Date(requestedTime).getTime();
+  if (Number.isNaN(target)) return null;
+  const targetMinute = Math.floor(target / 60000);
+
+  for (const slot of slots) {
+    const slotMs = new Date(slot).getTime();
+    if (!Number.isNaN(slotMs) && Math.floor(slotMs / 60000) === targetMinute) {
+      return slot;
+    }
+  }
+  return null;
+}
+
 interface HistoryMessage {
   direction: string;
   body_text: string;
