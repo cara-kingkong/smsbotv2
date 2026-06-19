@@ -314,6 +314,7 @@ function eventBadgeClass(eventType: string): string {
     case 'booking_initiated': return 'bg-blue-50 text-blue-700';
     case 'booking_queued': return 'bg-sky-50 text-sky-700';
     case 'booking_acceptance_detected': return 'bg-indigo-50 text-indigo-700';
+    case 'booking_promise_rescued': return 'bg-indigo-50 text-indigo-700';
     default: return 'bg-slate-100 text-slate-700';
   }
 }

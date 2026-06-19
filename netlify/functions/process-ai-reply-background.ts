@@ -30,7 +30,7 @@ import { CalendlyAdapter } from '../../src/lib/calendar/adapters/calendly';
 import { isWithinBusinessHours, getNextBusinessHoursStart, filterSlotsWithinBusinessHours } from '../../src/lib/utils/business-hours';
 import { evaluateStopConditions } from '../../src/lib/utils/stop-conditions';
 import { countConsecutiveFollowups } from '../../src/lib/utils/followups';
-import { detectBookingAcceptance, matchAvailableSlot, AVAILABILITY_WINDOW_DAYS } from '../../src/lib/utils/booking-guard';
+import { detectBookingAcceptance, detectBookingPromise, matchAvailableSlot, AVAILABILITY_WINDOW_DAYS } from '../../src/lib/utils/booking-guard';
 import { isValidTimezone, friendlyTimezoneLabel } from '../../src/lib/utils/timezones';
 import { detectReaction } from '../../src/lib/utils/reaction';
 import { runQueueJob } from '../../src/lib/queues/job-runner';
@@ -462,6 +462,39 @@ export default async (req: Request, _context: Context) =>
     // attempted too early we block it and re-ask the model for a reply that
     // keeps qualifying, rather than sending a premature "I'll book you in" line.
     const bookingAcceptance = detectBookingAcceptance(history);
+
+    // ── Self-contradiction rescue ────────────────────────────────
+    // The model intermittently NARRATES a booking ("Great! I'll get you booked
+    // in now") in reply_text while leaving should_offer_times/should_book false.
+    // The thread then stalls WaitingForLead forever even though the lead already
+    // said yes (see qualified-not-booked threads with "No booking events
+    // logged"). When the AI committed to booking but set no booking flag, and we
+    // haven't already offered times on this thread, treat the promise as an
+    // intent to offer times so the slot menu actually goes out. This is gated by
+    // the same qualified + calendars checks as every other booking pathway below
+    // (the qualification gate strips the flag again if the lead isn't qualified).
+    // Capture the promising reply now — the qualification gate below may
+    // overwrite reply_text with a re-qualify question. The diagnostics event is
+    // emitted AFTER that gate (see below) so it records whether the forced offer
+    // actually proceeded or was stripped back, rather than logging a misleading
+    // "rescued" next to a BookingBlockedUnqualified that undid it.
+    let promiseRescued = false;
+    const promisedReplyText = decision.reply_text;
+    if (
+      !decision.should_offer_times &&
+      !decision.should_book &&
+      !priorSlotsEvent &&
+      calendars.length > 0 &&
+      detectBookingPromise(decision.reply_text)
+    ) {
+      promiseRescued = true;
+      decision.should_offer_times = true;
+      decision.confidence_notes = [
+        ...decision.confidence_notes,
+        'Forced should_offer_times: reply promised to book but no booking flag was set',
+      ];
+    }
+
     let bookingBlockedForQualification = false;
 
     const wantsToBook =
@@ -507,6 +540,21 @@ export default async (req: Request, _context: Context) =>
       decision.confirmed_time = null;
       decision.escalate_to_human = false;
       decision.should_reply = true;
+    }
+
+    // Record the promise-rescue for diagnostics, now that the qualification gate
+    // has decided whether the forced offer proceeds or was blocked.
+    if (promiseRescued) {
+      await db.from('conversation_events').insert({
+        conversation_id,
+        event_type: ConversationEventType.BookingPromiseRescued,
+        event_payload_json: {
+          reason: 'booking_promise_without_flag',
+          qualification_state: decision.qualification_state,
+          blocked_unqualified: bookingBlockedForQualification,
+          reply_text: promisedReplyText,
+        },
+      });
     }
 
     // ── Already-booked guard (defense in depth) ──────────────────

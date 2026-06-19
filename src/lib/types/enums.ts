@@ -118,6 +118,7 @@ export enum ConversationEventType {
   BookingCancelled = 'booking_cancelled',
   BookingNeedsHuman = 'booking_needs_human',
   BookingAcceptanceDetected = 'booking_acceptance_detected',
+  BookingPromiseRescued = 'booking_promise_rescued',
   BookingBlockedUnqualified = 'booking_blocked_unqualified',
   BookingTimeUnavailable = 'booking_time_unavailable',
   BookingReAttemptBlocked = 'booking_re_attempt_blocked',

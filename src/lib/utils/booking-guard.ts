@@ -57,8 +57,12 @@ interface HistoryMessage {
   body_text: string;
 }
 
+// "chat" is deliberately NOT a bare keyword — it's far too common in casual SMS
+// ("thanks for the chat", "good to chat") and would over-trigger the acceptance
+// fallback. It only counts as scheduling context when qualified as a meeting
+// ("a chat", "quick chat", "30-min chat"). session/catch-up cover the rest.
 const SCHEDULING_CONTEXT_RE =
-  /\b(book|booking|booked|calendar|schedule|scheduled|appointment|meeting|call|availability|available|slot|time)\b/i;
+  /\b(?:book|booking|booked|calendar|schedule|scheduled|appointment|meeting|call|availability|available|slot|time|session|catch[\s-]?up)\b|\b(?:a|quick|short|brief|free|\d{1,3}[\s-]?min(?:ute)?s?)\s+chat\b/i;
 const AFFIRMATIVE_RE =
   /\b(yes|yep|yeah|sure|ok|okay|works|perfect|great|confirmed|confirm|book it|let'?s do it|sounds good|that works|works for me)\b/i;
 const TIME_RE =
@@ -95,4 +99,43 @@ export function detectBookingAcceptance(history: HistoryMessage[]): BookingSigna
     schedulingContext,
     evidence,
   };
+}
+
+// Phrases where the AI COMMITS to booking the lead in — a declarative promise,
+// not a question. These are the lines the model emits once the lead has agreed
+// ("Great! I'll get you booked in now", "let me lock in a time for you").
+const BOOKING_PROMISE_RE =
+  /\b(book(?:ing|ed)? you in|get(?:ting)? you booked|booked in(?: now)?|lock(?:ing)? (?:you |that |it )?in\b|lock in (?:a )?time|set(?:ting)? up (?:a |the )?(?:call|time|booking)|line up (?:a |the )?(?:call|time))\b/i;
+
+// Interrogative offers to book ("want me to book you in?", "shall I line up a
+// call?"). These are NOT commitments — the lead hasn't agreed yet — so a promise
+// must NOT be inferred from them, or we'd offer times before the lead says yes.
+const BOOKING_OFFER_QUESTION_RE =
+  /\b(want me to|would you like(?: me)?|shall i|should i|do you want me to|happy for me to|can i|may i)\b[^.!?]*\b(book|lock|set up|line up)/i;
+
+// Negated commitments ("I won't book you in yet", "I can't lock you in until you
+// confirm budget"). The booking phrase is present but the AI is explicitly NOT
+// booking, so a promise must not be inferred. Only matches when the negation
+// precedes the booking verb within the same sentence, so a genuine promise with
+// a trailing aside ("I'll book you in, don't worry") is unaffected.
+const BOOKING_NEGATION_RE =
+  /\b(won'?t|will not|can'?t|cannot|can not|not going to|don'?t|do not|unable to|haven'?t)\b[^.!?]*\b(book|lock|set up|line up|get you booked)/i;
+
+/**
+ * Did the AI's own reply COMMIT to booking the lead in (vs. merely offer to)?
+ *
+ * The model intermittently narrates the booking in prose ("I'll get you booked
+ * in now") while leaving `should_offer_times`/`should_book` false — the thread
+ * then stalls `WaitingForLead` forever even though the lead already agreed. The
+ * orchestrator treats a detected promise as an intent to offer times so the slot
+ * menu actually goes out. Interrogative offers ("want me to book you in?") are
+ * deliberately excluded: there the lead hasn't said yes, so offering times would
+ * jump the gun.
+ */
+export function detectBookingPromise(replyText: string | null | undefined): boolean {
+  const text = (replyText ?? '').trim();
+  if (!text) return false;
+  if (BOOKING_OFFER_QUESTION_RE.test(text)) return false;
+  if (BOOKING_NEGATION_RE.test(text)) return false;
+  return BOOKING_PROMISE_RE.test(text);
 }

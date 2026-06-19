@@ -3,6 +3,39 @@
 All notable changes to Kong SMS are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); dates are ISO (YYYY-MM-DD).
 
+## [2026-06-19]
+
+### Fixed
+
+- **Qualified leads no longer stall on booking after the AI says "I'll get you
+  booked in".** A qualified lead who agreed to a call would be parked
+  `waiting for lead` forever — the AI narrated the booking in prose ("Great!
+  I'll get you booked in now") but left `should_offer_times`/`should_book`
+  false, so the slot-offer machinery never ran and no times were ever sent.
+  Observed on multiple threads showing "qualified not booked" with **no booking
+  events logged**. The deterministic acceptance fallback couldn't rescue these:
+  it required either an explicit acceptance phrase or an affirmative paired with
+  a concrete time — but bare yeses ("Yes", "Ok") and offers framed as a
+  "strategy session" (not a tracked scheduling keyword) slipped through. Now:
+  - New `detectBookingPromise()` recognises when the AI's *own reply commits* to
+    booking ("get you booked in", "lock in a time") and forces a slot offer when
+    no booking flag was set — the one signal present in every stall regardless
+    of how the lead phrased their yes. Interrogative offers ("want me to book you
+    in?") and negated commitments ("I can't lock you in until…") are excluded so
+    times are never offered before the lead agrees.
+  - The rescue is gated by the same qualified + calendars-present checks as every
+    other booking pathway; an unqualified rescue is stripped back by the
+    qualification gate and recorded as such (`blocked_unqualified`).
+  - `SCHEDULING_CONTEXT_RE` now recognises `session` and `catch-up` so the
+    acceptance fallback fires for those offer framings too. `chat` only counts
+    when qualified as a meeting ("a quick chat") to avoid tripping on casual SMS
+    ("thanks for the chat").
+  - Each rescue emits a `booking_promise_rescued` event (visible in the Inbox
+    Diagnostics panel) so the failure mode is observable if it recurs.
+  - Files: `netlify/functions/process-ai-reply-background.ts`,
+    `src/lib/utils/booking-guard.ts`, `src/lib/types/enums.ts`,
+    `src/components/ConversationDiagnosticsPanel.vue`.
+
 ## [2026-06-18]
 
 ### Fixed
