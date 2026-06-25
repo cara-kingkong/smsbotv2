@@ -84,14 +84,25 @@ export default async (req: Request, _context: Context) =>
       return new Response('Skipped', { status: 200 });
     }
 
+    // A manual "Generate AI reply" trigger is an explicit operator request, so it
+    // overrides human control — but never resurrects a terminal thread.
+    const isManualGenerate = trigger === 'manual_generate';
     if (
-      conversation.human_controlled ||
+      (conversation.human_controlled && !isManualGenerate) ||
       conversation.status === ConversationStatus.Completed ||
       conversation.status === ConversationStatus.OptedOut ||
       conversation.status === ConversationStatus.Failed
     ) {
       return new Response('Skipped', { status: 200 });
     }
+
+    // Snapshot ownership BEFORE any status mutation. A manual "Generate AI reply"
+    // on a human-owned thread lets the AI take exactly one turn, but must NOT
+    // release the thread back to automation — we re-assert human control in the
+    // `finally` below and skip follow-up scheduling. In AI/listening mode this is
+    // false, so the manual trigger behaves like a normal AI turn.
+    const wasHumanControlled = conversation.human_controlled;
+    const keepHumanControl = isManualGenerate && wasHumanControlled;
 
     const agentService = new AgentService(db);
     const leadService = new LeadService(db);
@@ -196,8 +207,10 @@ export default async (req: Request, _context: Context) =>
       effectiveBusinessHours = workspace.business_hours_json as typeof effectiveBusinessHours;
     }
 
+    // A manual "Generate AI reply" is an explicit operator request — send now
+    // rather than deferring to the next business-hours window.
     const hasBusinessHours = effectiveBusinessHours?.schedule?.length > 0;
-    if (!isTestConversation && hasBusinessHours && !isWithinBusinessHours(effectiveBusinessHours, lead.timezone)) {
+    if (!isTestConversation && !isManualGenerate && hasBusinessHours && !isWithinBusinessHours(effectiveBusinessHours, lead.timezone)) {
       const nextOpen = getNextBusinessHoursStart(effectiveBusinessHours, lead.timezone);
       if (nextOpen) {
         await queueService.enqueue({
@@ -212,6 +225,11 @@ export default async (req: Request, _context: Context) =>
       }
     }
 
+    // From here the AI acts on the thread (sends replies, offers slots, books,
+    // escalates) — all of which flip the conversation into AI-owned statuses. The
+    // `finally` re-asserts human ownership when this was a manual turn on a
+    // human-controlled thread; it runs on every early return below too.
+    try {
     await heartbeat();
     const history = await messagingService.getHistory(conversation_id);
 
@@ -257,6 +275,63 @@ export default async (req: Request, _context: Context) =>
     const previouslyOfferedSlots = (priorSlotsEvent?.event_payload_json as Record<string, unknown>)?.slots as string[] | undefined;
 
     await heartbeat();
+
+    // Send a lead-facing holding line on a human hand-off. Two guardrails:
+    //  • Cold threads (lead never replied) stay silent — texting a ghost breaks
+    //    the human persona. The team is still notified out-of-band.
+    //  • If a holding line is already "open" — we've told the lead we'll be in
+    //    touch and no human has stepped in since — don't repeat it every time
+    //    they chase us up; that repetition is exactly what reads as robotic. This
+    //    is keyed off the `holding_line_sent` event, NOT conversation.status: the
+    //    inbound webhook flips a non-human thread back to `active` before this job
+    //    runs, so a status check would miss the repeat (see hasActiveHoldingLine).
+    // `aiGenerate` swaps the static fallback for a short, natural line that
+    // acknowledges the lead's last message; on any failure it uses the fallback.
+    // `force` bypasses both guards for warm booking confirmations the lead is
+    // actively expecting (they just tried to book).
+    const sendHoldingLine = async (
+      reason: string,
+      fallbackText: string,
+      opts?: { aiGenerate?: boolean; force?: boolean },
+    ): Promise<void> => {
+      if (!opts?.force) {
+        if (!lastInbound) return;
+        if (await hasActiveHoldingLine(db, conversation_id)) return;
+      }
+
+      const bodyText = opts?.aiGenerate
+        ? await aiService.generateHoldingMessage({
+            conversation_history: history,
+            lead_first_name: lead.first_name,
+            reason,
+            provider_key: providerKey,
+            fallback: fallbackText,
+          })
+        : fallbackText;
+
+      try {
+        await queueSystemMessage(queueService, db, {
+          workspaceId: conversation.workspace_id,
+          conversationId: conversation_id,
+          to: lead.phone_e164,
+          bodyText,
+          sourceJobId: undefined,
+        });
+        // Mark the holding line as "open" so repeat chases don't re-send it
+        // until a human takes over (which resets the suppression window).
+        await db.from('conversation_events').insert({
+          conversation_id,
+          event_type: ConversationEventType.HoldingLineSent,
+          event_payload_json: {
+            reason,
+            ai_generated: opts?.aiGenerate === true,
+            forced: opts?.force === true,
+          },
+        });
+      } catch (err) {
+        console.error(`Failed to queue holding SMS (${reason}):`, err);
+      }
+    };
 
     // ── First outbound message: use the agent's opening message ──
     // When there's no history yet, this is the AI initiating the thread. If an
@@ -759,22 +834,8 @@ export default async (req: Request, _context: Context) =>
           qualificationState: decision.qualification_state,
         });
 
-        // Only send a lead-facing line when the lead has actually engaged
-        // (e.g. they asked for a real person mid-conversation). Cold threads
-        // stay silent — `lastInbound` is the lead's most recent inbound message.
-        if (lastInbound) {
-          try {
-            await queueSystemMessage(queueService, db, {
-              workspaceId: conversation.workspace_id,
-              conversationId: conversation_id,
-              to: lead.phone_e164,
-              bodyText: ENGAGED_ESCALATION_MESSAGE,
-              sourceJobId: undefined,
-            });
-          } catch (err) {
-            console.error('Failed to queue escalation SMS:', err);
-          }
-        }
+        // Send a natural, engaged-only holding line (see sendHoldingLine).
+        await sendHoldingLine('ai_escalation', ENGAGED_ESCALATION_MESSAGE, { aiGenerate: true });
         return new Response('Escalated', { status: 200 });
       }
     }
@@ -818,7 +879,10 @@ export default async (req: Request, _context: Context) =>
         ? version
         : (await agentService.getActiveVersion(conversation.agent_id)) ?? version;
       const cadence = cadenceVersion.reply_cadence_json;
-      if (!isTestConversation && cadence && cadence.max_followups > 0 && cadence.followup_delay_seconds > 0) {
+      // Don't arm autonomous follow-ups for a manual turn the human still owns —
+      // that would be exactly the "released back to automation" behaviour we're
+      // avoiding. AI/listening-mode manual turns still schedule normally.
+      if (!isTestConversation && !keepHumanControl && cadence && cadence.max_followups > 0 && cadence.followup_delay_seconds > 0) {
         // If this reply was itself triggered by a follow-up job, the lead was
         // silent — record it explicitly so max_followups counts consecutive
         // nudges to a silent lead, not genuine back-and-forth replies.
@@ -901,17 +965,7 @@ export default async (req: Request, _context: Context) =>
           qualificationState: decision.qualification_state,
         });
         if (!tookAction) {
-          try {
-            await queueSystemMessage(queueService, db, {
-              workspaceId: conversation.workspace_id,
-              conversationId: conversation_id,
-              to: lead.phone_e164,
-              bodyText: BOOKING_HANDOFF_MESSAGE,
-              sourceJobId: undefined,
-            });
-          } catch (err) {
-            console.error('Failed to queue booking-time-unavailable SMS:', err);
-          }
+          await sendHoldingLine('requested_time_unavailable', BOOKING_HANDOFF_MESSAGE, { force: true });
         }
         return new Response('Requested time unavailable — needs human', { status: 200 });
       }
@@ -970,17 +1024,7 @@ export default async (req: Request, _context: Context) =>
       // here (unlike a cold escalation). Skip it only if we already replied
       // this turn, to avoid double-texting.
       if (!tookAction) {
-        try {
-          await queueSystemMessage(queueService, db, {
-            workspaceId: conversation.workspace_id,
-            conversationId: conversation_id,
-            to: lead.phone_e164,
-            bodyText: BOOKING_HANDOFF_MESSAGE,
-            sourceJobId: undefined,
-          });
-        } catch (err) {
-          console.error('Failed to queue booking-needs-human SMS:', err);
-        }
+        await sendHoldingLine('booking_needs_human', BOOKING_HANDOFF_MESSAGE, { force: true });
       }
       return new Response('Booking needs human — no resolvable calendar', { status: 200 });
     } else if (
@@ -1038,17 +1082,7 @@ export default async (req: Request, _context: Context) =>
         qualificationState: decision.qualification_state,
       });
       if (!tookAction) {
-        try {
-          await queueSystemMessage(queueService, db, {
-            workspaceId: conversation.workspace_id,
-            conversationId: conversation_id,
-            to: lead.phone_e164,
-            bodyText: BOOKING_HANDOFF_MESSAGE,
-            sourceJobId: undefined,
-          });
-        } catch (err) {
-          console.error('Failed to queue acceptance-no-slots SMS:', err);
-        }
+        await sendHoldingLine('acceptance_no_slots', BOOKING_HANDOFF_MESSAGE, { force: true });
       }
       return new Response('Acceptance detected but no slots — needs human', { status: 200 });
     } else if (!bookingBlockedForQualification && bookingAcceptance.acceptanceDetected) {
@@ -1065,17 +1099,11 @@ export default async (req: Request, _context: Context) =>
       });
       await conversationService.updateStatus(conversation_id, ConversationStatus.NeedsHuman);
       if (!tookAction) {
-        try {
-          await queueSystemMessage(queueService, db, {
-            workspaceId: conversation.workspace_id,
-            conversationId: conversation_id,
-            to: lead.phone_e164,
-            bodyText: 'Thanks, we have your preferred time. A team member will confirm the booking details shortly.',
-            sourceJobId: undefined,
-          });
-        } catch (err) {
-          console.error('Failed to queue booking-acceptance SMS:', err);
-        }
+        await sendHoldingLine(
+          'booking_acceptance_no_calendar',
+          'Thanks, we have your preferred time. A team member will confirm the booking details shortly.',
+          { force: true },
+        );
       }
       return new Response('Needs human', { status: 200 });
     }
@@ -1153,19 +1181,7 @@ export default async (req: Request, _context: Context) =>
         qualificationState: decision.qualification_state,
       });
 
-      if (lastInbound) {
-        try {
-          await queueSystemMessage(queueService, db, {
-            workspaceId: conversation.workspace_id,
-            conversationId: conversation_id,
-            to: lead.phone_e164,
-            bodyText: ENGAGED_ESCALATION_MESSAGE,
-            sourceJobId: undefined,
-          });
-        } catch (err) {
-          console.error('Failed to queue ai-no-action SMS:', err);
-        }
-      }
+      await sendHoldingLine('ai_no_action', ENGAGED_ESCALATION_MESSAGE, { aiGenerate: true });
       return new Response('Needs human', { status: 200 });
     }
 
@@ -1233,6 +1249,24 @@ export default async (req: Request, _context: Context) =>
     }
 
     return new Response('OK', { status: 200 });
+    } finally {
+      // Keep release/listening mode separate from manual generation: a manual
+      // turn on a human-owned thread sends one AI reply but ownership stays with
+      // the human. Re-assert it on every non-terminal exit (this `finally` also
+      // covers all the early returns above). Terminal outcomes the AI reached
+      // this turn — opt-out, stop-condition completion, failure — are left as-is.
+      if (keepHumanControl) {
+        const current = await conversationService.getById(conversation_id);
+        const terminal = [
+          ConversationStatus.Completed,
+          ConversationStatus.OptedOut,
+          ConversationStatus.Failed,
+        ];
+        if (current && !terminal.includes(current.status as ConversationStatus)) {
+          await conversationService.updateStatus(conversation_id, ConversationStatus.HumanControlled);
+        }
+      }
+    }
   });
 
 /**
@@ -1259,6 +1293,70 @@ async function hasReachedQualified(
     .limit(1);
 
   return Array.isArray(data) && data.length > 0;
+}
+
+/**
+ * Is there an "open" holding line on this thread — i.e. have we already told the
+ * lead we'll be in touch, without a human having engaged since? True when the
+ * most recent `holding_line_sent` event is newer than the most recent human
+ * engagement (a human-sent reply or a release back to AI).
+ *
+ * Keyed off events/messages rather than conversation.status on purpose: the
+ * inbound Twilio webhook resets a non-human-controlled thread back to `active`
+ * before the AI job runs, so checking the live status would miss the repeat and
+ * re-send the same canned line every time the lead chases us up. A human engaging
+ * resets the window so a genuinely fresh escalation later still gets a holding
+ * line.
+ */
+async function hasActiveHoldingLine(
+  db: { from: (table: string) => ReturnType<import('@supabase/supabase-js').SupabaseClient['from']> },
+  conversationId: string,
+): Promise<boolean> {
+  const [holdResult, humanMsgResult, releaseResult] = await Promise.all([
+    db.from('conversation_events')
+      .select('created_at')
+      .eq('conversation_id', conversationId)
+      .eq('event_type', ConversationEventType.HoldingLineSent)
+      .order('created_at', { ascending: false })
+      .limit(1),
+    // A human SENDING the lead a message fulfils the "I'll be in touch" promise.
+    // We key off this (not `human_takeover`) because api-inbox-reply only emits a
+    // takeover event when the thread wasn't already human-controlled — so a human
+    // replying on a thread they already own would otherwise never reset the
+    // window, wedging suppression on for every later escalation.
+    db.from('messages')
+      .select('created_at')
+      .eq('conversation_id', conversationId)
+      .eq('direction', MessageDirection.Outbound)
+      .eq('sender_type', SenderType.Human)
+      .order('created_at', { ascending: false })
+      .limit(1),
+    // A human releasing the thread back to AI is also an "I've dealt with it"
+    // boundary, even if they didn't text the lead — so a fresh escalation after a
+    // release gets a new holding line.
+    db.from('conversation_events')
+      .select('created_at')
+      .eq('conversation_id', conversationId)
+      .eq('event_type', ConversationEventType.HumanRelease)
+      .order('created_at', { ascending: false })
+      .limit(1),
+  ]);
+
+  const holds = holdResult.data as Array<{ created_at: string }> | null;
+  const lastHold = holds && holds.length > 0 ? holds[0].created_at : null;
+  if (!lastHold) return false;
+
+  // The holding line is still "open" (suppress repeats) unless a human has
+  // engaged — replied to the lead or released the thread — more recently.
+  const resetTimes: number[] = [];
+  const humanMsgs = humanMsgResult.data as Array<{ created_at: string }> | null;
+  if (humanMsgs && humanMsgs.length > 0) resetTimes.push(new Date(humanMsgs[0].created_at).getTime());
+  const releases = releaseResult.data as Array<{ created_at: string }> | null;
+  if (releases && releases.length > 0) resetTimes.push(new Date(releases[0].created_at).getTime());
+
+  if (resetTimes.length === 0) return true;
+
+  return new Date(lastHold).getTime() > Math.max(...resetTimes);
 }
 
 /**

@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import type { AIProviderAdapter, AIPromptContext, AIDecision, OpeningMessageContext } from '@lib/types';
+import type { AIProviderAdapter, AIPromptContext, AIDecision, OpeningMessageContext, HoldingLineContext } from '@lib/types';
 import { QualificationState } from '@lib/types';
 import { reactionPromptNote } from '@lib/utils/reaction';
 import { followupPromptNote, FOLLOWUP_USER_TURN } from '@lib/utils/followups';
@@ -24,6 +24,16 @@ Rules:
 - Format as short labelled lines, e.g. "Revenue: ~$40k/mo". Keep the whole summary under ~120 words.
 - If the lead shared almost nothing useful, say so in a single line.
 - Output ONLY the summary text — no preamble, no headings, no closing remarks.`;
+
+const HOLDING_SYSTEM_PROMPT = `You are the same person who has been texting this lead. The conversation now needs a real teammate to step in, so you're sending ONE short SMS to hold the thread warmly until they follow up.
+
+Your job:
+- Acknowledge what the lead just said in your own words — react to THIS conversation, don't send a generic line.
+- Let them know you're on it / passing it to the right person and will be back in touch shortly. Keep it casual and human.
+- Stay in character as the same sender. Do NOT say you're an AI, a bot, or "the system". Do NOT mention escalation, queues, or internal process.
+- One or two short sentences. No links, no booking times, no emojis unless they used them first. Never write placeholders like "[Name]".
+
+Reply with ONLY the SMS text — no quotes, no options, no explanation.`;
 
 const OPENING_SYSTEM_PROMPT = `You are writing the FIRST outbound SMS to a new lead. Below are the opening-message instructions. They may be a single message OR prompt-style guidance with conditional variants (e.g. one version when a first name is known and another when it isn't, or different versions depending on the reason for reaching out).
 
@@ -240,6 +250,29 @@ export class OpenAIAdapter implements AIProviderAdapter {
     return text || context.message;
   }
 
+  async generateHoldingLine(context: HoldingLineContext): Promise<string> {
+    const completion = await this.client.chat.completions.create({
+      model: context.model || DEFAULT_OPENING_MODEL,
+      messages: [
+        { role: 'system', content: HOLDING_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: [
+            context.first_name ? `Lead's first name: ${context.first_name}` : 'Lead has no first name on file.',
+            `Reason for handing off: ${context.reason || 'needs a teammate'}`,
+            '',
+            'Recent conversation (oldest to newest):',
+            formatTranscript(context.conversation_history),
+          ].join('\n'),
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 200,
+    });
+
+    return completion.choices[0]?.message?.content?.trim() ?? '';
+  }
+
   async summarizeSituation(transcript: string): Promise<string> {
     const completion = await this.client.chat.completions.create({
       model: DEFAULT_SUMMARY_MODEL,
@@ -253,6 +286,17 @@ export class OpenAIAdapter implements AIProviderAdapter {
 
     return completion.choices[0]?.message?.content?.trim() ?? '';
   }
+}
+
+/** Render recent messages as a "Lead: …" / "You: …" transcript for holding-line context. */
+function formatTranscript(
+  history: Array<{ direction: string; sender_type: string; body_text: string }>,
+): string {
+  const recent = history.slice(-12);
+  if (recent.length === 0) return '(no messages yet)';
+  return recent
+    .map((m) => `${m.direction === 'inbound' ? 'Lead' : 'You'}: ${m.body_text}`)
+    .join('\n');
 }
 
 /** Format ISO slots with human-readable times so the AI can match them */

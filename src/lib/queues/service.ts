@@ -196,6 +196,27 @@ export class QueueService {
     return data?.length ?? 0;
   }
 
+  /**
+   * Is a `generate_ai_reply` job currently being processed for this conversation?
+   * True only for a `running` job with a live (non-expired) lease — an expired
+   * lease means the worker died and the job will be reclaimed, so it doesn't
+   * count as in-flight. Used by the manual "Generate AI reply" trigger to avoid
+   * enqueuing a second turn while one is already mid-flight (cancelling pending
+   * jobs alone can't stop a worker that has already started).
+   */
+  async hasRunningAIReply(conversationId: string): Promise<boolean> {
+    const { data } = await this.db
+      .from('jobs')
+      .select('id')
+      .eq('status', JobStatus.Running)
+      .eq('job_type', 'generate_ai_reply')
+      .gt('lease_expires_at', new Date().toISOString())
+      .contains('payload_json', { conversation_id: conversationId })
+      .limit(1);
+
+    return Array.isArray(data) && data.length > 0;
+  }
+
   async listDeadLettered(queueName?: string): Promise<Job[]> {
     let query = this.db
       .from('jobs')

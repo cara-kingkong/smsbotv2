@@ -32,6 +32,7 @@ const handlers: Record<string, (req: Request, ctx: unknown) => Promise<Response>
   'api-inbox-reply': (await import('../../../netlify/functions/api-inbox-reply')).default,
   'api-inbox-takeover': (await import('../../../netlify/functions/api-inbox-takeover')).default,
   'api-inbox-release': (await import('../../../netlify/functions/api-inbox-release')).default,
+  'api-inbox-generate-reply': (await import('../../../netlify/functions/api-inbox-generate-reply')).default,
   'api-inbox-delete': (await import('../../../netlify/functions/api-inbox-delete')).default,
   'api-dashboard-stats': (await import('../../../netlify/functions/api-dashboard-stats')).default,
   'api-jobs-list': (await import('../../../netlify/functions/api-jobs-list')).default,

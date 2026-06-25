@@ -130,6 +130,8 @@ export enum ConversationEventType {
   LeadTimezoneUpdated = 'lead_timezone_updated',
   HumanTakeover = 'human_takeover',
   HumanRelease = 'human_release',
+  ManualReplyTriggered = 'manual_reply_triggered',
+  HoldingLineSent = 'holding_line_sent',
   EscalationNotified = 'escalation_notified',
   Paused = 'paused',
   Resumed = 'resumed',

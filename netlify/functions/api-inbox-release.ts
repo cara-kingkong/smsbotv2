@@ -1,7 +1,6 @@
 import type { Context } from '@netlify/functions';
 import { getServiceClient } from '../../src/lib/db/client';
 import { ConversationService } from '../../src/lib/conversations/service';
-import { QueueService } from '../../src/lib/queues/service';
 import { requireWorkspaceAccess } from '../../src/lib/auth/request';
 import { requireRole } from '../../src/lib/auth/permissions';
 import { WorkspaceRole } from '../../src/lib/types';
@@ -44,20 +43,12 @@ export default async (req: Request, _context: Context) => {
       );
     }
 
-    // Release back to AI
+    // Release back to AI into LISTENING MODE only. We deliberately do NOT enqueue
+    // an AI reply here — handing the thread back shouldn't fire an unprompted
+    // message. The AI resumes naturally on the lead's next inbound (see
+    // webhook-twilio-inbound), or immediately if an operator hits "Generate AI
+    // reply" (api-inbox-generate-reply).
     const updated = await conversationService.releaseToAI(conversation_id);
-
-    // Queue an AI reply job so AI picks up where it left off
-    const queueService = new QueueService(db);
-    await queueService.enqueue({
-      workspace_id: conversation.workspace_id,
-      job_type: 'generate_ai_reply',
-      queue_name: 'ai',
-      payload: {
-        conversation_id,
-        trigger: 'human_release',
-      },
-    });
 
     return new Response(JSON.stringify(updated), {
       status: 200,

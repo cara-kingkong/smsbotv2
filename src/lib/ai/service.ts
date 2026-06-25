@@ -114,6 +114,40 @@ export class AIService {
     }
   }
 
+  /**
+   * Produce a short, natural "I'll get back to you" holding SMS for a human
+   * hand-off, acknowledging the lead's last message so it doesn't read like a
+   * canned line. Falls back to the provided static text if the adapter can't
+   * generate one (missing method, API error, or empty result) — the hand-off
+   * itself must never depend on the LLM succeeding.
+   */
+  async generateHoldingMessage(input: {
+    conversation_history: Message[];
+    lead_first_name?: string | null;
+    reason?: string;
+    provider_key: string;
+    fallback: string;
+  }): Promise<string> {
+    const adapter = this.providerAdapters.get(input.provider_key);
+    if (!adapter?.generateHoldingLine) return input.fallback;
+
+    try {
+      const text = await adapter.generateHoldingLine({
+        conversation_history: input.conversation_history.map((m) => ({
+          direction: m.direction,
+          sender_type: m.sender_type,
+          body_text: m.body_text,
+        })),
+        first_name: input.lead_first_name,
+        reason: input.reason,
+      });
+      return text.trim() || input.fallback;
+    } catch (err) {
+      console.warn('Holding-line generation failed; using fallback:', err);
+      return input.fallback;
+    }
+  }
+
   private validateDecision(raw: AIDecision): AIDecision {
     return {
       should_reply: typeof raw.should_reply === 'boolean' ? raw.should_reply : true,

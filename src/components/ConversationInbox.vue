@@ -96,6 +96,18 @@
           </div>
 
           <div class="flex items-center gap-2 shrink-0">
+            <span v-if="generateError" class="text-[12px] font-medium text-amber-600 max-w-[16rem] leading-tight">
+              {{ generateError }}
+            </span>
+            <button
+              v-if="!isTerminal"
+              class="button-secondary"
+              :disabled="generatingReply"
+              title="Ask the AI to write and send the next reply now"
+              @click="generateReply"
+            >
+              {{ generatingReply ? 'Generating...' : 'Generate AI reply' }}
+            </button>
             <button
               v-if="!isTerminal && selected.human_controlled"
               class="button-secondary"
@@ -287,6 +299,8 @@ const messagesError = ref('');
 const replyText = ref('');
 const sendLoading = ref(false);
 const actionLoading = ref(false);
+const generatingReply = ref(false);
+const generateError = ref('');
 const confirmingDelete = ref(false);
 const threadRef = ref<HTMLElement | null>(null);
 const replyRef = ref<HTMLTextAreaElement | null>(null);
@@ -560,6 +574,35 @@ async function release() {
     }
   } finally {
     actionLoading.value = false;
+  }
+}
+
+async function generateReply() {
+  if (!selected.value) return;
+  generatingReply.value = true;
+  generateError.value = '';
+  try {
+    const res = await fetch(`${API_BASE}/api-inbox-generate-reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: selected.value.id }),
+    });
+    if (res.ok) {
+      // The AI reply is generated asynchronously by the queue; refresh shortly
+      // so the operator sees it land without manually reloading.
+      await Promise.all([fetchConversations(), fetchMessages(selected.value.id)]);
+      const updated = conversations.value.find((c) => c.id === selectedId.value);
+      if (updated) selected.value = updated;
+      scrollToBottom();
+    } else {
+      // Surface backend conflicts (e.g. a reply is already mid-flight) instead of
+      // a silent no-op. Auto-clears so it doesn't linger.
+      const body = await res.json().catch(() => ({}));
+      generateError.value = body?.error ?? 'Could not generate a reply. Try again.';
+      setTimeout(() => { generateError.value = ''; }, 6000);
+    }
+  } finally {
+    generatingReply.value = false;
   }
 }
 

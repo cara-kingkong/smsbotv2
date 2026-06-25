@@ -82,6 +82,19 @@ export interface OpeningMessageContext {
   model?: string;
 }
 
+export interface HoldingLineContext {
+  /**
+   * Recent conversation so the holding line can acknowledge what the lead just
+   * said instead of reading as a canned, context-free auto-reply.
+   */
+  conversation_history: Array<{ direction: string; sender_type: string; body_text: string }>;
+  first_name?: string | null;
+  /** Why we're handing off (e.g. 'ai_escalation', 'ai_no_action') — steers tone. */
+  reason?: string;
+  /** Provider model id to use for the lightweight generation call. */
+  model?: string;
+}
+
 export interface AIProviderAdapter {
   generateReply(context: AIPromptContext): Promise<AIDecision>;
   /**
@@ -89,6 +102,12 @@ export interface AIProviderAdapter {
    * No decision schema, no conversation context — just rephrase/insert the name.
    */
   generateOpening?(context: OpeningMessageContext): Promise<string>;
+  /**
+   * Write a single short, natural "I'll get back to you" holding SMS when the
+   * thread is being handed to a human. Acknowledges the lead's last message so it
+   * doesn't read like a canned line. Uses a cheap model. Plain text, no links.
+   */
+  generateHoldingLine?(context: HoldingLineContext): Promise<string>;
   /**
    * Summarize the lead's situation (revenue, marketing budget, goals, etc.) from
    * a conversation transcript, for a sales rep reading the contact in their CRM.
