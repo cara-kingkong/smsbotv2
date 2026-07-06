@@ -83,14 +83,17 @@
             <h2 class="section-title mt-3">Assigned agents</h2>
             <p class="section-copy mt-2">The split-test roster currently serving this campaign.</p>
           </div>
-          <a :href="`/agents?campaign=${campaignId}`" class="button-secondary">View in Agent Directory</a>
+          <div class="flex shrink-0 items-center gap-3">
+            <a :href="`/agents?campaign=${campaignId}`" class="button-secondary">View in Agent Directory</a>
+            <button type="button" class="button-primary" @click="openCreateAgentModal">Add Agent</button>
+          </div>
         </div>
 
         <div v-if="campaignAgents.length === 0" class="empty-state">
           <div class="text-center space-y-3">
             <div class="text-base font-semibold text-slate-900">This campaign needs an AI agent</div>
             <p class="text-sm text-slate-500 max-w-xs mx-auto">An agent handles conversations for this campaign. Add one to start qualifying leads automatically.</p>
-            <a :href="`/agents?campaign=${campaignId}`" class="button-primary inline-flex">Add agent to this campaign</a>
+            <button type="button" class="button-primary inline-flex" @click="openCreateAgentModal">Add agent to this campaign</button>
           </div>
         </div>
 
@@ -315,6 +318,66 @@
         </fieldset>
       </div>
     </div>
+
+    <!-- Create Agent Modal (scoped to this campaign) -->
+    <div v-if="showCreateAgentModal" class="modal-overlay" @click.self="showCreateAgentModal = false">
+      <div class="modal-panel">
+        <div class="flex items-center justify-between border-b px-5 py-4" style="border-color: rgba(17,17,17,0.06);">
+          <h2 class="section-title">Add Agent</h2>
+          <button class="text-slate-400 hover:text-slate-600 text-lg" @click="showCreateAgentModal = false">&times;</button>
+        </div>
+
+        <form class="space-y-5 px-5 py-5" @submit.prevent="createAgent">
+          <div class="panel-muted space-y-4">
+            <div class="note-box text-xs">
+              This agent will be assigned to <span class="font-semibold text-slate-700">{{ detail.name || campaign?.name }}</span>.
+            </div>
+
+            <div>
+              <label class="form-label">Agent Name *</label>
+              <input
+                v-model="agentForm.name"
+                type="text"
+                required
+                placeholder="e.g. Friendly Closer"
+                class="input"
+              />
+            </div>
+
+            <div>
+              <label class="form-label">Description</label>
+              <textarea
+                v-model="agentForm.description"
+                rows="2"
+                placeholder="Brief description of this agent's personality or approach"
+                class="input"
+              ></textarea>
+            </div>
+
+            <div>
+              <label class="form-label">Weight</label>
+              <input
+                v-model.number="agentForm.weight"
+                type="number"
+                min="1"
+                max="1000"
+                class="input"
+              />
+              <p class="form-help">Relative traffic weight for A/B split testing. Higher = more traffic.</p>
+            </div>
+          </div>
+
+          <div v-if="agentCreateError" class="feedback-error">{{ agentCreateError }}</div>
+
+          <div class="flex gap-3">
+            <button type="submit" :disabled="agentCreateLoading" class="button-primary">
+              {{ agentCreateLoading ? 'Creating...' : 'Create Agent' }}
+            </button>
+            <button type="button" class="button-secondary" @click="showCreateAgentModal = false">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -428,6 +491,51 @@ const detail = ref({
 const saving = ref(false);
 const saveError = ref('');
 const saveSuccess = ref('');
+
+// Add-agent modal (scoped to this campaign)
+const showCreateAgentModal = ref(false);
+const agentForm = ref({ name: '', description: '', weight: 100 });
+const agentCreateLoading = ref(false);
+const agentCreateError = ref('');
+
+function openCreateAgentModal() {
+  agentForm.value = { name: '', description: '', weight: 100 };
+  agentCreateError.value = '';
+  showCreateAgentModal.value = true;
+}
+
+async function createAgent() {
+  agentCreateError.value = '';
+  agentCreateLoading.value = true;
+
+  try {
+    const res = await fetch(`${API_BASE}/api-agents-create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        campaign_id: props.campaignId,
+        name: agentForm.value.name,
+        description: agentForm.value.description || undefined,
+        weight: agentForm.value.weight,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      agentCreateError.value = data.error || 'Failed to create agent';
+      return;
+    }
+
+    // A new agent has no published prompt yet — continue to its detail page so
+    // the user can set one up, matching the create flow in the Agent Directory.
+    window.location.href = `/agents/${data.id}`;
+  } catch {
+    agentCreateError.value = 'Network error. Please try again.';
+  } finally {
+    agentCreateLoading.value = false;
+  }
+}
 
 // Calendar assignments
 interface CalendarRecord {

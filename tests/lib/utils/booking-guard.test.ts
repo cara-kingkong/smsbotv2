@@ -40,6 +40,94 @@ describe('detectBookingAcceptance', () => {
     expect(result.acceptanceDetected).toBe(true);
     expect(result.evidence).toContain('inbound_explicit_acceptance');
   });
+
+  // Regression matrix: the classic outbound-anchored path must keep working
+  // exactly as before the inbound self-proposal path was added.
+  it('detects acceptance of an offered slot ("2pm works")', () => {
+    const result = detectBookingAcceptance([
+      { direction: 'outbound', body_text: "I've got 10am or 2pm tomorrow available - which works?" },
+      { direction: 'inbound', body_text: '2pm works' },
+    ]);
+
+    expect(result.acceptanceDetected).toBe(true);
+    expect(result.evidence).toContain('prior_outbound_scheduling_context');
+  });
+
+  it('detects a "yes" plus a time after a scheduling question', () => {
+    const result = detectBookingAcceptance([
+      { direction: 'outbound', body_text: 'want to schedule a call?' },
+      { direction: 'inbound', body_text: 'yes, tomorrow morning' },
+    ]);
+
+    expect(result.acceptanceDetected).toBe(true);
+  });
+
+  it('does not detect acceptance on a plain qualification answer', () => {
+    const result = detectBookingAcceptance([
+      { direction: 'outbound', body_text: "what's your ballpark monthly revenue at the moment?" },
+      { direction: 'inbound', body_text: 'Around $30k' },
+    ]);
+
+    expect(result.acceptanceDetected).toBe(false);
+  });
+
+  it('returns no signal for empty history or a thread with no inbound yet', () => {
+    expect(detectBookingAcceptance([]).acceptanceDetected).toBe(false);
+    expect(
+      detectBookingAcceptance([
+        { direction: 'outbound', body_text: 'Hey! Quick question about your goals.' },
+      ]).acceptanceDetected,
+    ).toBe(false);
+  });
+});
+
+describe('detectBookingAcceptance — inbound self-proposal path', () => {
+  const withInbound = (inbound: string, outbound = "what's your ballpark monthly revenue at the moment?") =>
+    detectBookingAcceptance([
+      { direction: 'outbound', body_text: outbound },
+      { direction: 'inbound', body_text: inbound },
+    ]);
+
+  // Regression (real incident): the lead volunteered a time in reply to a
+  // revenue question. The prior outbound had no scheduling keywords, so the
+  // classic path was blind and the thread stalled in waiting_for_lead forever.
+  it('detects the verbatim stalled-lead message (time volunteered unprompted)', () => {
+    const result = withInbound('I can do 3pm tomorrow for a phone chat');
+
+    expect(result.schedulingContext).toBe(false); // classic path saw nothing
+    expect(result.acceptanceDetected).toBe(true);
+    expect(result.evidence).toContain('inbound_self_proposed_time');
+    expect(result.evidence).toContain('inbound_scheduling_context');
+    expect(result.evidence).toContain('inbound_time_reference');
+  });
+
+  it('detects a "how about" proposal with a scheduling noun', () => {
+    const result = withInbound('How about Friday at 10am for a call?', 'Sounds like you know your numbers.');
+
+    expect(result.acceptanceDetected).toBe(true);
+    expect(result.evidence).toContain('inbound_self_proposed_time');
+  });
+
+  it('detects a volunteered availability window for a chat', () => {
+    const result = withInbound("I'm free tomorrow afternoon for a quick chat", 'Appreciate the detail!');
+
+    expect(result.acceptanceDetected).toBe(true);
+    expect(result.evidence).toContain('inbound_self_proposed_time');
+  });
+
+  it('does NOT fire on a time word without scheduling/proposal framing', () => {
+    expect(withInbound('tomorrow is my birthday').acceptanceDetected).toBe(false);
+  });
+
+  it('does NOT fire on negated availability', () => {
+    expect(withInbound("I can't do 3pm tomorrow").acceptanceDetected).toBe(false);
+    expect(withInbound("I don't have time for a call tomorrow").acceptanceDetected).toBe(false);
+    expect(withInbound("tomorrow doesn't work").acceptanceDetected).toBe(false);
+  });
+
+  it('does NOT fire on a casual past-tense chat mention with a time word', () => {
+    expect(withInbound('we had a great chat yesterday').acceptanceDetected).toBe(false);
+  });
 });
 
 describe('detectBookingPromise', () => {
@@ -104,6 +192,24 @@ describe('scheduling context "chat" handling', () => {
   it('treats a qualified "chat" (a meeting) as scheduling context', () => {
     expect(accept('Want to jump on a quick chat to map this out?').schedulingContext).toBe(true);
     expect(accept('Keen for a 15-min chat this week?').schedulingContext).toBe(true);
+  });
+
+  it('treats a qualified chat with one meeting-ish modifier as scheduling context', () => {
+    expect(accept('Keen for a phone chat this week?').schedulingContext).toBe(true);
+    expect(accept('Want to jump on a video chat?').schedulingContext).toBe(true);
+    expect(accept('Fancy a zoom chat about it?').schedulingContext).toBe(true);
+  });
+
+  it('still ignores casual chat even next to an inbound affirmation', () => {
+    const result = accept('thanks for the chat!', 'yeah great');
+
+    expect(result.schedulingContext).toBe(false);
+    expect(result.acceptanceDetected).toBe(false);
+  });
+
+  it('does NOT treat a modified casual chat as scheduling context', () => {
+    expect(accept('We had a great chat!').schedulingContext).toBe(false);
+    expect(accept('Good to chat yesterday.').schedulingContext).toBe(false);
   });
 });
 
