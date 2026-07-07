@@ -132,6 +132,21 @@ export class ConversationService {
     return data;
   }
 
+  /**
+   * Manually record a `booked` outcome without running any booking automation.
+   * For when a human operator has taken the thread over and booked the lead
+   * out-of-band (e.g. on a call) and just needs the result reflected in
+   * reporting. Deliberately side-effect free: no Calendly hold, no CRM sync,
+   * no confirmation SMS. The conversation status is left untouched so the
+   * operator keeps the open thread, and the outcome column can be changed again
+   * later — this is a reversible label, not a terminal transition.
+   */
+  async markBookedManually(id: string): Promise<Conversation> {
+    const data = await this.setOutcome(id, ConversationOutcome.Booked);
+    await this.logEvent(id, ConversationEventType.BookingMarkedManual, { source: 'manual_operator' });
+    return data;
+  }
+
   async releaseToAI(id: string): Promise<Conversation> {
     const data = await this.updateStatus(id, ConversationStatus.Active);
     await this.logEvent(id, ConversationEventType.HumanRelease, {});

@@ -3,6 +3,57 @@
 All notable changes to Kong SMS are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); dates are ISO (YYYY-MM-DD).
 
+## [2026-07-07]
+
+### Added
+
+- **"Mark as booked" button for human-controlled conversations.** When an
+  operator takes a thread over and books the lead out-of-band (e.g. on a call),
+  they can now record the outcome directly from the Inbox. The button records
+  the `booked` outcome **only** — it runs no booking automation: no Calendly
+  hold, no CRM sync, no confirmation SMS — and deliberately leaves the
+  conversation status untouched, so the thread stays open and human-controlled
+  and the operator can keep replying. The label is reversible (it's an outcome
+  tag, not a terminal transition), so a mis-click can be corrected. The button
+  shows only while a conversation is human-controlled and not already booked;
+  once set, the emerald `booked` badge appears and the button hides itself. Each
+  use logs a `booking_marked_manual` event (`source: manual_operator`) so a
+  manual booking is distinguishable from an automated one in the Inbox
+  Diagnostics booking trace, and the dashboard "booked" metric picks it up via
+  the outcome. Manager role required; terminal (completed / opted-out / failed)
+  threads are rejected so a closed outcome is never relabelled.
+  - Files: `netlify/functions/api-inbox-mark-booked.ts`,
+    `src/pages/api/[...fn].ts`, `src/lib/conversations/service.ts`,
+    `src/lib/types/enums.ts`, `src/components/ConversationInbox.vue`.
+
+### Fixed
+
+- **Qualified leads who volunteer a time unprompted no longer stall silently.**
+  A qualified lead who proposed a time in reply to a non-scheduling question
+  ("I can do 3pm tomorrow for a phone chat" straight after "what's your ballpark
+  monthly revenue?") could be parked `waiting for lead` forever. The model
+  returned `should_reply: false` with no booking flags, the orchestrator
+  classified the turn as intentional silence, and the deterministic acceptance
+  fallback couldn't rescue it — `detectBookingAcceptance` only inferred
+  acceptance from the *previous outbound's* scheduling context, so a time the
+  lead volunteered when the prior AI message had no scheduling keywords was
+  invisible. Now:
+  - `detectBookingAcceptance` gains an **inbound self-proposal path**: it fires
+    when the lead's own message carries a time reference plus either proposal
+    framing ("I can do…", "how about…", "I'm free…", "does X work") or a
+    scheduling noun (call / meeting / "phone chat"), with no reliance on the
+    prior outbound.
+  - A negation guard suppresses it on negated availability ("I can't do 3pm
+    tomorrow", "tomorrow doesn't work") so a decline never books.
+  - `SCHEDULING_CONTEXT_RE` now accepts one meeting-ish modifier before "chat"
+    ("a phone / video / zoom chat") without tripping on casual "a great chat".
+  - New evidence keys (`inbound_self_proposed_time`, `inbound_scheduling_context`)
+    distinguish this rescue path from the classic offered-slot acceptance in the
+    `booking_acceptance_detected` / `booking_blocked_unqualified` diagnostics.
+    The rescue remains gated by the existing qualified + calendars checks, so an
+    unqualified lead is still blocked.
+  - Files: `src/lib/utils/booking-guard.ts`.
+
 ## [2026-06-19]
 
 ### Fixed

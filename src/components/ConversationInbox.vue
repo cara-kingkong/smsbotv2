@@ -117,6 +117,15 @@
               {{ actionLoading ? 'Releasing...' : 'Release to AI' }}
             </button>
             <button
+              v-if="!isTerminal && selected.human_controlled && selected.outcome !== 'booked'"
+              class="button-secondary !text-emerald-700 hover:!bg-emerald-50"
+              :disabled="markingBooked"
+              title="Record this lead as booked (reporting only — sends nothing, books no calendar, keeps the thread open)"
+              @click="markBooked"
+            >
+              {{ markingBooked ? 'Saving...' : 'Mark as booked' }}
+            </button>
+            <button
               v-if="!isTerminal && !selected.human_controlled"
               class="button-primary"
               :disabled="actionLoading"
@@ -301,6 +310,7 @@ const sendLoading = ref(false);
 const actionLoading = ref(false);
 const generatingReply = ref(false);
 const generateError = ref('');
+const markingBooked = ref(false);
 const confirmingDelete = ref(false);
 const threadRef = ref<HTMLElement | null>(null);
 const replyRef = ref<HTMLTextAreaElement | null>(null);
@@ -574,6 +584,28 @@ async function release() {
     }
   } finally {
     actionLoading.value = false;
+  }
+}
+
+// Record a manual `booked` outcome for reporting. Fires no booking automation
+// and leaves the status untouched (see api-inbox-mark-booked) — the thread stays
+// open and human-controlled; only the outcome badge changes.
+async function markBooked() {
+  if (!selected.value) return;
+  markingBooked.value = true;
+  try {
+    const res = await fetch(`${API_BASE}/api-inbox-mark-booked`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: selected.value.id }),
+    });
+    if (res.ok) {
+      await fetchConversations();
+      const updated = conversations.value.find((c) => c.id === selectedId.value);
+      if (updated) selected.value = updated;
+    }
+  } finally {
+    markingBooked.value = false;
   }
 }
 

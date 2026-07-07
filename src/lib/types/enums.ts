@@ -122,6 +122,8 @@ export enum ConversationEventType {
   BookingBlockedUnqualified = 'booking_blocked_unqualified',
   BookingTimeUnavailable = 'booking_time_unavailable',
   BookingReAttemptBlocked = 'booking_re_attempt_blocked',
+  // Operator manually recorded a `booked` outcome (no booking automation ran).
+  BookingMarkedManual = 'booking_marked_manual',
   BookingCloseoutQueued = 'booking_closeout_queued',
   BookingCloseoutFailed = 'booking_closeout_failed',
   // Post-close / re-engagement + lead profile updates.

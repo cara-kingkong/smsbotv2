@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ConversationService } from '../../../src/lib/conversations/service';
-import { ConversationStatus, ConversationEventType } from '../../../src/lib/types';
+import { ConversationStatus, ConversationOutcome, ConversationEventType } from '../../../src/lib/types';
 import type { Conversation } from '../../../src/lib/types';
 
 function createMockDb() {
@@ -186,6 +186,60 @@ describe('ConversationService', () => {
       expect(eventInserts.length).toBe(1);
       expect((eventInserts[0].data as Record<string, unknown>).event_type).toBe(
         ConversationEventType.HumanTakeover,
+      );
+    });
+  });
+
+  describe('markBookedManually', () => {
+    it('sets the booked outcome and logs a BookingMarkedManual event without touching status', async () => {
+      const updated = makeConversation({
+        status: ConversationStatus.HumanControlled,
+        human_controlled: true,
+        outcome: ConversationOutcome.Booked,
+      });
+
+      const updatePayloads: Record<string, unknown>[] = [];
+      const insertedEvents: { table: string; data: unknown }[] = [];
+      const db = {
+        from: vi.fn().mockImplementation((table: string) => {
+          if (table === 'conversations') {
+            return {
+              update: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+                updatePayloads.push(payload);
+                return {
+                  eq: vi.fn().mockReturnValue({
+                    select: vi.fn().mockReturnValue({
+                      single: vi.fn().mockResolvedValue({ data: updated, error: null }),
+                    }),
+                  }),
+                };
+              }),
+            };
+          }
+          return {
+            insert: vi.fn().mockImplementation((data: unknown) => {
+              insertedEvents.push({ table, data });
+              return {
+                select: vi.fn().mockReturnValue({
+                  single: vi.fn().mockResolvedValue({ data: null, error: null }),
+                }),
+              };
+            }),
+          };
+        }),
+      };
+
+      const service = new ConversationService(db as any);
+      const result = await service.markBookedManually('conv-1');
+
+      expect(result.outcome).toBe(ConversationOutcome.Booked);
+      // Only the outcome column is written — status is deliberately left alone.
+      expect(updatePayloads).toEqual([{ outcome: ConversationOutcome.Booked }]);
+
+      const eventInserts = insertedEvents.filter((e) => e.table === 'conversation_events');
+      expect(eventInserts.length).toBe(1);
+      expect((eventInserts[0].data as Record<string, unknown>).event_type).toBe(
+        ConversationEventType.BookingMarkedManual,
       );
     });
   });
