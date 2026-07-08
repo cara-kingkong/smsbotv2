@@ -963,7 +963,7 @@
   }
 
   .inbox-thread-header {
-    @apply flex items-center justify-between gap-4 px-4 py-3 border-b;
+    @apply flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 border-b;
     border-color: var(--border);
   }
 

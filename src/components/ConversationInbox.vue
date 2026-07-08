@@ -95,7 +95,7 @@
             </div>
           </div>
 
-          <div class="flex items-center gap-2 shrink-0">
+          <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
             <span v-if="generateError" class="text-[12px] font-medium text-amber-600 max-w-[16rem] leading-tight">
               {{ generateError }}
             </span>
