@@ -319,7 +319,7 @@
       </div>
     </div>
 
-    <!-- Create Agent Modal (scoped to this campaign) -->
+    <!-- Add Agent Modal -->
     <div v-if="showCreateAgentModal" class="modal-overlay" @click.self="showCreateAgentModal = false">
       <div class="modal-panel">
         <div class="flex items-center justify-between border-b px-5 py-4" style="border-color: rgba(17,17,17,0.06);">
@@ -327,7 +327,28 @@
           <button class="text-slate-400 hover:text-slate-600 text-lg" @click="showCreateAgentModal = false">&times;</button>
         </div>
 
-        <form class="space-y-5 px-5 py-5" @submit.prevent="createAgent">
+        <!-- Mode tabs -->
+        <div class="flex border-b" style="border-color: rgba(17,17,17,0.06);">
+          <button
+            type="button"
+            class="px-5 py-3 text-sm font-medium border-b-2 transition-colors"
+            :class="agentMode === 'create' ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-700'"
+            @click="switchAgentMode('create')"
+          >
+            Create New
+          </button>
+          <button
+            type="button"
+            class="px-5 py-3 text-sm font-medium border-b-2 transition-colors"
+            :class="agentMode === 'duplicate' ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-700'"
+            @click="switchAgentMode('duplicate')"
+          >
+            Duplicate Existing
+          </button>
+        </div>
+
+        <!-- Create New -->
+        <form v-if="agentMode === 'create'" class="space-y-5 px-5 py-5" @submit.prevent="createAgent">
           <div class="panel-muted space-y-4">
             <div class="note-box text-xs">
               This agent will be assigned to <span class="font-semibold text-slate-700">{{ detail.name || campaign?.name }}</span>.
@@ -376,6 +397,74 @@
             <button type="button" class="button-secondary" @click="showCreateAgentModal = false">Cancel</button>
           </div>
         </form>
+
+        <!-- Duplicate Existing -->
+        <div v-else class="space-y-5 px-5 py-5">
+          <div class="note-box text-xs">
+            Select a workspace agent to duplicate into <span class="font-semibold text-slate-700">{{ detail.name || campaign?.name }}</span>. The copy starts as <span class="font-semibold text-slate-700">paused</span> — only the active prompt version is copied. Activate it from the agent page when ready.
+          </div>
+
+          <div v-if="workspaceAgentsLoading" class="text-sm text-slate-500">Loading agents...</div>
+
+          <div v-else-if="workspaceAgents.length === 0" class="note-box text-xs text-slate-500">
+            No agents found in this workspace.
+          </div>
+
+          <div v-else class="max-h-60 overflow-y-auto space-y-2">
+            <label
+              v-for="wa in workspaceAgents"
+              :key="wa.id"
+              class="flex items-start gap-3 rounded-2xl border px-4 py-3 transition-colors"
+              :class="[
+                wa.active_version_number ? 'cursor-pointer' : 'cursor-not-allowed opacity-50',
+                duplicateForm.source_agent_id === wa.id ? 'border-teal-400 bg-teal-50' : 'border-slate-200 bg-white/70',
+              ]"
+            >
+              <input
+                type="radio"
+                :value="wa.id"
+                v-model="duplicateForm.source_agent_id"
+                :disabled="!wa.active_version_number"
+                class="mt-0.5 h-4 w-4 shrink-0 text-teal-600 border-slate-300 focus:ring-teal-500"
+              />
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-sm font-semibold text-slate-900 truncate">{{ wa.name }}</span>
+                  <span class="badge shrink-0" :class="statusClass(wa.status)">{{ wa.status }}</span>
+                </div>
+                <div class="mt-1 text-xs text-slate-500 flex items-center gap-2">
+                  <span class="truncate">{{ wa.campaign_name }}</span>
+                  <span v-if="wa.active_version_number" class="shrink-0 text-teal-700">v{{ wa.active_version_number }}</span>
+                  <span v-else class="shrink-0 text-amber-600">No active prompt</span>
+                </div>
+              </div>
+            </label>
+          </div>
+
+          <div>
+            <label class="form-label">Name override <span class="font-normal text-slate-400">(optional)</span></label>
+            <input
+              v-model="duplicateForm.name"
+              type="text"
+              placeholder="Leave blank to keep the original name"
+              class="input"
+            />
+          </div>
+
+          <div v-if="duplicateError" class="feedback-error">{{ duplicateError }}</div>
+
+          <div class="flex gap-3">
+            <button
+              type="button"
+              :disabled="!duplicateForm.source_agent_id || duplicateLoading"
+              class="button-primary"
+              @click="submitDuplicate"
+            >
+              {{ duplicateLoading ? 'Duplicating...' : 'Duplicate Agent' }}
+            </button>
+            <button type="button" class="button-secondary" @click="showCreateAgentModal = false">Cancel</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -494,14 +583,58 @@ const saveSuccess = ref('');
 
 // Add-agent modal (scoped to this campaign)
 const showCreateAgentModal = ref(false);
+const agentMode = ref<'create' | 'duplicate'>('create');
 const agentForm = ref({ name: '', description: '', weight: 100 });
 const agentCreateLoading = ref(false);
 const agentCreateError = ref('');
 
+// Workspace agents for the duplicate picker
+interface WorkspaceAgentRecord {
+  id: string;
+  name: string;
+  status: string;
+  campaign_name: string;
+  active_version_number: number | null;
+}
+const workspaceAgents = ref<WorkspaceAgentRecord[]>([]);
+const workspaceAgentsLoading = ref(false);
+
+// Duplicate form state
+const duplicateForm = ref({ source_agent_id: '', name: '' });
+const duplicateLoading = ref(false);
+const duplicateError = ref('');
+
 function openCreateAgentModal() {
   agentForm.value = { name: '', description: '', weight: 100 };
+  duplicateForm.value = { source_agent_id: '', name: '' };
+  agentMode.value = 'create';
   agentCreateError.value = '';
+  duplicateError.value = '';
   showCreateAgentModal.value = true;
+}
+
+function switchAgentMode(mode: 'create' | 'duplicate') {
+  agentMode.value = mode;
+  agentCreateError.value = '';
+  duplicateError.value = '';
+  if (mode === 'duplicate' && workspaceAgents.value.length === 0 && !workspaceAgentsLoading.value) {
+    fetchWorkspaceAgentsList();
+  }
+}
+
+async function fetchWorkspaceAgentsList() {
+  if (!campaign.value?.workspace_id) return;
+  workspaceAgentsLoading.value = true;
+  try {
+    const res = await fetch(`${API_BASE}/api-agents-workspace-list?workspace_id=${campaign.value.workspace_id}`);
+    if (res.ok) {
+      workspaceAgents.value = await res.json();
+    }
+  } catch {
+    // Empty state will show
+  } finally {
+    workspaceAgentsLoading.value = false;
+  }
 }
 
 async function createAgent() {
@@ -534,6 +667,37 @@ async function createAgent() {
     agentCreateError.value = 'Network error. Please try again.';
   } finally {
     agentCreateLoading.value = false;
+  }
+}
+
+async function submitDuplicate() {
+  if (!duplicateForm.value.source_agent_id) return;
+  duplicateError.value = '';
+  duplicateLoading.value = true;
+
+  try {
+    const res = await fetch(`${API_BASE}/api-agents-create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        campaign_id: props.campaignId,
+        source_agent_id: duplicateForm.value.source_agent_id,
+        name: duplicateForm.value.name || undefined,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      duplicateError.value = data.error || 'Failed to duplicate agent';
+      return;
+    }
+
+    window.location.href = `/agents/${data.id}`;
+  } catch {
+    duplicateError.value = 'Network error. Please try again.';
+  } finally {
+    duplicateLoading.value = false;
   }
 }
 

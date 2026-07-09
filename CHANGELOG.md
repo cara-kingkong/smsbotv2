@@ -3,6 +3,43 @@
 All notable changes to Kong SMS are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); dates are ISO (YYYY-MM-DD).
 
+## [2026-07-09]
+
+### Added
+
+- **Campaign editor can now duplicate an existing agent into the current
+  campaign.** The Add Agent modal now supports two paths: create a brand-new
+  agent, or select an existing workspace agent and duplicate it into the active
+  campaign. The duplicate carries over the source agent's metadata plus its
+  current active prompt version only; historical versions are not copied. After
+  creation, the UI redirects straight to the new agent detail page so the
+  operator can review or edit the duplicate immediately.
+  - Files: `src/components/CampaignDetail.vue`,
+    `netlify/functions/api-agents-create.ts`,
+    `src/lib/agents/service.ts`.
+
+### Changed
+
+- **`api-agents-create` now supports a server-side duplicate mode.** When
+  `source_agent_id` is supplied, the create endpoint duplicates the source
+  agent into the requested campaign instead of creating a blank agent shell.
+  The copy logic stays entirely on the server, including workspace validation
+  and prompt-version cloning, so the browser does not reconstruct agent state
+  client-side.
+  - Files: `netlify/functions/api-agents-create.ts`,
+    `src/lib/agents/service.ts`.
+
+### Fixed
+
+- **Duplicated agents no longer enter live routing immediately, and failed
+  copies are cleaned up.** New duplicates are created in a paused state so
+  copying a source agent is not itself a traffic-launch action. If prompt
+  version cloning fails after the new agent row is created, the system now
+  soft-deletes the orphaned duplicate as a best-effort rollback so it does not
+  remain visible or routable in the campaign.
+  - Files: `src/lib/agents/service.ts`,
+    `tests/lib/agents/service.test.ts`.
+
 ## [2026-07-07]
 
 ### Added

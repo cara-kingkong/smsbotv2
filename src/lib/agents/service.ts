@@ -2,12 +2,23 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Agent, AgentVersion } from '@lib/types';
 import { EntityStatus } from '@lib/types';
 
+export class AgentServiceError extends Error {
+  constructor(
+    public readonly code: 'NOT_FOUND' | 'WORKSPACE_MISMATCH' | 'NO_ACTIVE_VERSION',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AgentServiceError';
+  }
+}
+
 export interface CreateAgentInput {
   campaign_id: string;
   name: string;
   description?: string;
   weight?: number;
   ai_provider_integration_id?: string;
+  status?: EntityStatus;
 }
 
 export interface UpdateAgentInput {
@@ -16,6 +27,13 @@ export interface UpdateAgentInput {
   description?: string;
   weight?: number;
   status?: string;
+}
+
+export interface DuplicateAgentInput {
+  source_agent_id: string;
+  target_campaign_id: string;
+  name?: string;
+  weight?: number;
 }
 
 export interface CreateAgentVersionInput {
@@ -45,7 +63,7 @@ export class AgentService {
     const row: Record<string, unknown> = {
       campaign_id: input.campaign_id,
       name: input.name,
-      status: EntityStatus.Active,
+      status: input.status ?? EntityStatus.Active,
       weight: input.weight ?? 1,
       ai_provider_integration_id: input.ai_provider_integration_id ?? null,
     };
@@ -352,5 +370,91 @@ export class AgentService {
 
     if (error) throw new Error(`Failed to activate version: ${error.message}`);
     return data;
+  }
+
+  async duplicateToCampaign(input: DuplicateAgentInput): Promise<Agent> {
+    const { data: sourceRow, error: sourceErr } = await this.db
+      .from('agents')
+      .select('*, campaigns!inner(workspace_id)')
+      .eq('id', input.source_agent_id)
+      .is('deleted_at', null)
+      .single();
+
+    if (sourceErr || !sourceRow) {
+      throw new AgentServiceError('NOT_FOUND', 'Source agent not found');
+    }
+
+    const sourceAgent = sourceRow as Agent & { campaigns: { workspace_id: string } };
+    const sourceWorkspaceId = sourceAgent.campaigns.workspace_id;
+
+    const { data: targetCampaign, error: targetErr } = await this.db
+      .from('campaigns')
+      .select('id, workspace_id')
+      .eq('id', input.target_campaign_id)
+      .single();
+
+    if (targetErr || !targetCampaign) {
+      throw new AgentServiceError('NOT_FOUND', 'Target campaign not found');
+    }
+
+    const targetWorkspaceId = (targetCampaign as { id: string; workspace_id: string }).workspace_id;
+    if (sourceWorkspaceId !== targetWorkspaceId) {
+      throw new AgentServiceError(
+        'WORKSPACE_MISMATCH',
+        'Source agent and target campaign belong to different workspaces',
+      );
+    }
+
+    const activeVersion = await this.getActiveVersion(input.source_agent_id);
+    if (!activeVersion) {
+      throw new AgentServiceError(
+        'NO_ACTIVE_VERSION',
+        'Source agent has no active prompt version to duplicate',
+      );
+    }
+
+    // Create the duplicate as paused so it never enters live routing until
+    // the operator deliberately activates it.
+    const newAgent = await this.create({
+      campaign_id: input.target_campaign_id,
+      name: input.name ?? sourceAgent.name,
+      description: sourceAgent.description ?? undefined,
+      weight: input.weight ?? sourceAgent.weight,
+      ai_provider_integration_id: sourceAgent.ai_provider_integration_id ?? undefined,
+      status: EntityStatus.Paused,
+    });
+
+    // Copy the version separately. If this step fails we roll back the agent
+    // row so the user doesn't end up with a promptless orphan in the campaign.
+    try {
+      await this.createVersion({
+        agent_id: newAgent.id,
+        prompt_text: activeVersion.prompt_text,
+        system_rules_json: activeVersion.system_rules_json,
+        reply_cadence_json: activeVersion.reply_cadence_json as Record<string, unknown>,
+        allowed_actions_json: activeVersion.allowed_actions_json as unknown as Record<string, unknown>,
+        qualification_rules_json: activeVersion.qualification_rules_json as unknown as Record<string, unknown>,
+        config_json: activeVersion.config_json,
+      });
+    } catch (versionErr) {
+      // Best-effort rollback: soft-delete the orphaned agent row so it is
+      // invisible to routing and the agent list. Swallow secondary failures —
+      // the caller will receive the original version-copy error regardless.
+      try {
+        await this.db
+          .from('agents')
+          .update({
+            status: EntityStatus.Archived,
+            deleted_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', newAgent.id);
+      } catch {
+        // Ignore rollback failure; original error is re-thrown below
+      }
+      throw versionErr;
+    }
+
+    return newAgent;
   }
 }
